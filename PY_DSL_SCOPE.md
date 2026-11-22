@@ -1,13 +1,47 @@
 # Python front end for change sets ("Scratch-Python")
 
-**Status:** plan, not started. Written 2026-11-22 against the release-verified
-tree (407 tests passing).
+**Status:** Phases A–B implemented on branch `pydsl` (2026-11-22); JSON remains
+the default generator. Suite: 550 passed, 2 skipped. See the implementation
+status section below for what shipped and what the live smoke found.
 **Idea:** let the model write in a language it is actually fluent in — a
 **checked subset of Python** — and transpile that to the existing block IR
 deterministically. No second model pass for conversion; the LLM is only a
 repair loop, exactly as today.
 **Target files:** bridge-side only (`bridge/src/harness/`). Zero Squeak work,
 zero wire-protocol changes, zero image changes.
+
+---
+
+## 0. Implementation status (2026-11-22)
+
+Shipped on branch `pydsl`, all offline-tested:
+
+- `harness/dsl/` — `vocab` (generated from `SPECS`: 128 callable ops, 11 module
+  calls, 9 hat decorators, `api_reference()`), `parse` (AST whitelist,
+  line-precise canonical diagnostics, symbol gate, `<=`/`>=`/`!=`
+  expansions), `render` (IR → dialect; `load_sprite` detail), `lint` CLI.
+- `generator = json | dsl` through the whole bridge: `resolve_generator()`
+  (`HARNESS_GENERATOR` env → `[harness]` ini → `json`), raw-text replies,
+  agent reply detection (JSON replies still accepted as fallback;
+  control-channel loads stay JSON), DSL repair prompts, dialect system prompt
+  + user-prompt tail, audit `generator` meta + `attempts/NN/dsl.json`,
+  `run_live.ps1 -Generator`, `tools/dsl_smoke.py`.
+- Round-trip: **143 historical audit bundles, zero mismatches**; 16 bundles
+  are inexpressible because the *original JSON-era model output* was invalid
+  (invented ops, wrong arg names, bad menus) — the error classes this front
+  end turns into parse-time rejections.
+- Live smoke (5 turns, `deepseek-v4.1-flash`): **every turn transpiled
+  first-try, zero repairs, 62–123 completion tokens** (~1.2–1.4 s). No
+  `bad_json`, no validation round-trips. The JSON era needed ~500–3,500
+  completion tokens for equivalent turns with frequent `bad_json` retries.
+- **Open finding (Phase C):** on revision prompts the model **adds** a new
+  script (`draw_square_200`) rather than **replacing** via
+  `script_id="ai-1"` — even with an explicit "change the draw_square script"
+  request and the dialect-shaped registry hint. The mechanics work (tests
+  cover replace via script_id); revision *discipline* is a prompt-tuning
+  question for the ladder: consider promoting the replace rule from the
+  appendix into `DSL_SYSTEM_PROMPT` itself, and measure with
+  `tools/audit.py score --group generator`.
 
 ---
 
@@ -405,27 +439,19 @@ the same diagnostic channel.
 
 ## 11. Open decisions
 
-1. **Bare-name variables (`score += 1`) vs explicit (`change_var("score", 1)`).**
-   Bare names are the biggest fluency win and the recommendation, but they
-   make `set_var`'s *value* a bare-name read (`score = timer` → set score to
-   timer) — fine — while `name`-as-string APIs (`delete_from_list`) still take
-   strings. Both exist in v1: bare names for variables, strings for list names;
-   the reference doc makes the split explicit. Cheap to reverse later because
-   the transpiler, not the model, is the surface.
-2. **`while c:` inversion.** Proposed: accept and expand to
-   `repeat_until(not c)`. Alternative: reject with "invert the condition".
-   Decide from ladder data; expansion is safe either way.
-3. **Unary minus.** `-x` → `subtract(0, x)` is exact but writes odd blocks;
-   rejecting pushes `0 - x`, which is what a Scratch author would write.
-   Lean reject; revisit with audits.
-4. **`elif` vs explicit nesting.** Proposed: accept and expand (deterministic,
-   matches how a Scratch author would nest if/else). Low risk.
-5. **String concatenation ambiguity** (section 4): literals decide, otherwise
-   require explicit `join`/`add`. Keeps the transpiler honest without a type
-   system; revisit only if ladder repairs show friction.
-6. **Where `summary()`/`notes()` live.** Proposed: dialect calls at module
-   top. Alternative: `# summary:` pragma comments (costs a `tokenize` pass);
-   calls are simpler and already in the whitelist.
+All six were resolved during implementation (branch `pydsl`):
+
+1. **Bare-name variables** — shipped (`score += 1` → `change_var`). Non-identifier
+   names render back as explicit `set_var("name", ...)` calls, so arbitrary IR
+   still round-trips.
+2. **`while c:` inversion** — accepted and expanded to `repeat_until(not c)`.
+3. **Unary minus** — rejected on computed values (`0 - x`), **negative literals
+   accepted** (`random(-20, 20)`, `x=-100`); the AST treats them as
+   `UnaryOp(USub, Constant)`.
+4. **`elif`** — accepted and expanded (nested `if` inside `else:`).
+5. **String concatenation** — a string literal on either side of `+` → `join`;
+   two computed operands rejected as ambiguous; otherwise arithmetic.
+6. **`summary()`/`notes()`** — dialect calls at module top.
 
 ---
 

@@ -325,6 +325,9 @@ The image never executes generated Smalltalk. It parses a restricted literal, va
 ### 4.5 Why this split
 
 - The **LLM never sees Smalltalk**. It sees block IR and a simplified block catalog.
+  With `generator = dsl` it never emits JSON either: it writes a checked Python
+  subset that the bridge transpiles deterministically (`PY_DSL_SCOPE.md`); the
+  JSON contract remains the default and an accepted fallback.
 - The **bridge never executes generated code**. It parses, validates, and compiles data.
 - The **image never executes arbitrary code**. It applies a validated change set.
 - The **visible result is first-class Scratch code**: editable, saveable, runnable blocks.

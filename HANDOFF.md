@@ -21,6 +21,7 @@ alone on purpose.
 | Undo, ownership, registry reconcile | Working |
 | Lazy context packs and sprite script detail | Working |
 | Python bridge, validator, compiler, providers | Working |
+| **Scratch-Python front end (`generator = dsl`)** | **Built behind the config flag; JSON stays the default.** See `PY_DSL_SCOPE.md` and `SCRATCH_AI_DSL_CONTEXT.md`. |
 | **Release image (windowed, no control server)** | **Verified** |
 | **Release bundle (stock media, no secrets)** | **Built, about 50.6 MB** |
 | Tests | **407 passed, 2 skipped** on a fresh clone (media fixture) |
@@ -196,7 +197,10 @@ What's missing, and what I'd try next, roughly in order:
    `0.0.0.0:8767` exposure and the firewall prompt.
 4. **Import gaps:** sound import, `.sprite` bundle import and a sound editor.
 5. **Model quality loop:** use `-Audit full`, `audit.py score`, and try a plan
-   followed by per-script chunks. I haven't measured that yet.
+   followed by per-script chunks. I haven't measured that yet. The
+   `generator = json | dsl` A/B tooling now exists (`audit.py score --group
+   generator`, `tools/dsl_smoke.py`, `run_live.ps1 -Generator`) but the
+   Phase C ladder itself has not been run.
 6. **Trademark-safe branding** before any wide public distribution.
 
 Also not there yet: chat history in requests, exact per-turn token accounting
@@ -221,6 +225,7 @@ with `tools\stop_bridge.ps1`. Profile and audit changes still come from
 | `context/` | lazy packs: clones, games, scrolling, pen-3d |
 | `SPRITE_STAGE_SCOPE.md` | sprite and stage, as built |
 | `DEEPSEEK_CONNECTION_SCOPE.md` | connection package |
+| `PY_DSL_SCOPE.md` | Python-subset front end: implemented (Phases A–B) with live-smoke findings; Phase C ladder pending |
 | `CHAT_UI_SCOPE.md` | docked rail |
 | `SCRATCH_2_FEATURE_AUDIT.md` | clones and BYOB audit |
 | `docs/SQUEAK_NOTES.md` | the Squeak and Scratch traps |

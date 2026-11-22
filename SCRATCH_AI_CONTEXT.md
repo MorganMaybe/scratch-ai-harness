@@ -1,7 +1,11 @@
 # Scratch AI Context Appendix
 
 **Status:** draft for iteration. This file **is** loaded by the bridge
-(`harness/context_doc.py`) and appended to the system prompt on every request.
+(`harness/context_doc.py`) and appended to the system prompt on every request
+when the default JSON generator is active. When `generator = dsl` is enabled,
+the bridge loads `SCRATCH_AI_DSL_CONTEXT.md` instead — the Scratch facts are
+the same, but the reply contract and examples are written for the
+Scratch-Python dialect (`PY_DSL_SCOPE.md`).
 Edit it here; the next request picks up the change (mtime cache, no bridge
 restart). Preview the result with:
 

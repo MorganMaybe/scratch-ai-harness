@@ -188,6 +188,16 @@ Scratch image (Morphic)                     Python bridge (asyncio)
 Every request carries a full project snapshot. The model never sees Python or Smalltalk. It emits a JSON block change set, and validation runs against the live project, so undo and manual edits get reconciled on the next turn.
 This is a blessing and a curse. mostly a curse. it doesn’t really know what its doing with that. im still tuning it, might change the whole process of doing that if i get some good liquor in.
 
+There is a second reply format: with `generator = dsl` (in `bridge/harness.ini`
+under `[harness]`, or `run_live.ps1 -Generator dsl`), the model answers in a
+checked subset of Python instead of JSON — one fenced module where module-level
+calls build the scene and one decorated `def` is one script. The bridge
+transpiles that to the same block IR with line-precise diagnostics, so
+`bad_json` and wrong-argument-name failures become parse-time rejections. The
+appendix the model sees is [`SCRATCH_AI_DSL_CONTEXT.md`](SCRATCH_AI_DSL_CONTEXT.md)
+and the design rationale is [`PY_DSL_SCOPE.md`](PY_DSL_SCOPE.md). JSON remains
+the default until the live A/B ladder says otherwise.
+
 Further reading, in roughly the order of insanity at interest:
 
 - Design and protocol: [`ARCHITECTURE.md`](ARCHITECTURE.md)
@@ -196,7 +206,8 @@ Further reading, in roughly the order of insanity at interest:
 - Connection layer: [`DEEPSEEK_CONNECTION_SCOPE.md`](DEEPSEEK_CONNECTION_SCOPE.md)
 - Chat rail: [`CHAT_UI_SCOPE.md`](CHAT_UI_SCOPE.md)
 - Squeak traps: [`docs/SQUEAK_NOTES.md`](docs/SQUEAK_NOTES.md)
-- Model appendix: [`SCRATCH_AI_CONTEXT.md`](SCRATCH_AI_CONTEXT.md)
+- Model appendix (JSON mode): [`SCRATCH_AI_CONTEXT.md`](SCRATCH_AI_CONTEXT.md)
+- Model appendix (DSL mode): [`SCRATCH_AI_DSL_CONTEXT.md`](SCRATCH_AI_DSL_CONTEXT.md)
 
 ## Repository layout
 
