@@ -7,6 +7,7 @@ Examples::
     python tools\\audit.py show latest --raw
     python tools\\audit.py raw latest
     python tools\\audit.py score
+    python tools\\audit.py score --group generator
 
 Audit bundles are opt-in.  Start the bridge with ``--audit full`` (or
 ``.\\run_live.ps1``, which defaults to full) to get prompts, raw model replies,
@@ -290,13 +291,30 @@ def cmd_raw(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_score(args: argparse.Namespace) -> int:
-    directory = Path(args.dir).expanduser()
-    entries = _read_index(directory)
-    if not entries:
-        print(f"no audit turns in {directory}")
-        return 0
+def _generator_of(directory: Path, entry: dict[str, Any]) -> str:
+    """Return one turn's ``generator`` value, defaulting to ``json``.
 
+    A missing or unreadable ``meta.json``, a non-object payload, a missing
+    field or a non-string value all fall back to ``json`` so an old bundle can
+    never break a grouped scan.
+    """
+    turn_name = entry.get("dir") or entry.get("turn")
+    if not turn_name:
+        return "json"
+    meta = _read_json(directory / str(turn_name) / "meta.json", {})
+    if not isinstance(meta, dict):
+        return "json"
+    value = meta.get("generator")
+    if not isinstance(value, str):
+        return "json"
+    text = value.strip().lower()
+    return text or "json"
+
+
+def _score_entries(
+    directory: Path, entries: list[dict[str, Any]]
+) -> tuple[dict[str, Any], Counter[str], Counter[str], Counter[str]]:
+    """Compute the existing score payload for a set of index entries."""
     outcomes = Counter(str(entry.get("outcome") or "unknown") for entry in entries)
     errors = Counter(
         str(entry.get("error")) for entry in entries if entry.get("error")
@@ -345,22 +363,27 @@ def cmd_score(args: argparse.Namespace) -> int:
         "multi_attempt_turns": multi_attempt,
         "validation_issues": dict(issues.most_common(20)),
     }
-    if args.json:
-        print(json.dumps(payload, indent=2))
-        return 0
+    return payload, outcomes, errors, issues
 
-    print(f"turns:      {turns}")
+
+def _print_score(
+    payload: dict[str, Any],
+    outcomes: Counter[str],
+    errors: Counter[str],
+    issues: Counter[str],
+) -> None:
+    print(f"turns:      {payload['turns']}")
     print("outcomes:   " + ", ".join(f"{key}={value}" for key, value in outcomes.most_common()))
-    print(f"attempts:   {attempts} (avg {payload['average_attempts']})")
+    print(f"attempts:   {payload['attempts']} (avg {payload['average_attempts']})")
     print(
-        f"tokens:     prompt={prompt_tokens} completion={completion_tokens} "
-        f"reasoning={reasoning_tokens} cached={cached_tokens} "
+        f"tokens:     prompt={payload['prompt_tokens']} completion={payload['completion_tokens']} "
+        f"reasoning={payload['reasoning_tokens']} cached={payload['cached_tokens']} "
         f"total={payload['total_tokens']}"
     )
     print(
-        f"elapsed:    {elapsed} ms (avg {payload['average_elapsed_ms']} ms, "
+        f"elapsed:    {payload['elapsed_ms']} ms (avg {payload['average_elapsed_ms']} ms, "
         f"max {payload['max_elapsed_ms']} ms; "
-        f"multi-attempt turns {multi_attempt})"
+        f"multi-attempt turns {payload['multi_attempt_turns']})"
     )
     if errors:
         print("errors:")
@@ -370,6 +393,39 @@ def cmd_score(args: argparse.Namespace) -> int:
         print("validation issues:")
         for message, count in issues.most_common(10):
             print(f"  {count:>3}  {_short(message, 160)}")
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    directory = Path(args.dir).expanduser()
+    entries = _read_index(directory)
+    if not entries:
+        print(f"no audit turns in {directory}")
+        return 0
+
+    if getattr(args, "group", None) == "generator":
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for entry in entries:
+            groups.setdefault(_generator_of(directory, entry), []).append(entry)
+        if args.json:
+            payload = {
+                name: _score_entries(directory, group)[0]
+                for name, group in sorted(groups.items())
+            }
+            print(json.dumps(payload, indent=2))
+            return 0
+        for position, (name, group) in enumerate(sorted(groups.items())):
+            if position:
+                print()
+            print(f"generator:  {name}")
+            payload, outcomes, errors, issues = _score_entries(directory, group)
+            _print_score(payload, outcomes, errors, issues)
+        return 0
+
+    payload, outcomes, errors, issues = _score_entries(directory, entries)
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+    _print_score(payload, outcomes, errors, issues)
     return 0
 
 
@@ -402,7 +458,16 @@ def main() -> int:
     p.add_argument("--attempt", type=int, help="only this attempt number")
     p.set_defaults(func=cmd_raw)
 
-    p = common("score", "aggregate outcomes, tokens and validation issues")
+    p = common(
+        "score",
+        "aggregate outcomes, tokens and validation issues "
+        "(--group generator splits the report by generator)",
+    )
+    p.add_argument(
+        "--group",
+        choices=("generator",),
+        help="break the score down per meta.json 'generator' value (missing = json)",
+    )
     p.set_defaults(func=cmd_score)
 
     args = parser.parse_args()
