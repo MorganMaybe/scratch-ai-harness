@@ -10,7 +10,7 @@
 param(
     [string]$Key = "",
     [switch]$Dev,
-    [string]$Profile = "opencode-go",
+    [string]$Profile = "",
     [switch]$SkipInstall
 )
 
@@ -55,6 +55,12 @@ if (-not (Test-Path $iniFile)) {
     Copy-Item -LiteralPath $iniExample -Destination $iniFile
     Write-Host "created bridge\harness.ini from the example"
 }
+if ($Profile) {
+    $content = Get-Content -LiteralPath $iniFile -Raw
+    $content = $content -replace '(?m)^default=.*$', "default=$Profile"
+    Set-Content -LiteralPath $iniFile -Value $content.TrimEnd() -Encoding ascii
+    Write-Host "default bridge profile: $Profile"
+}
 
 # --- API key --------------------------------------------------------------
 if (-not $Key) {
@@ -69,7 +75,7 @@ if (-not $Key) {
 if (-not $Key -and -not (Test-Path $keyFile)) {
     Write-Host ""
     Write-Host "Paste your API key. It is masked and stored only in bridge\.deepseek_key."
-    Write-Host "The default profile is '$Profile' (opencode-go gateway)."
+    Write-Host "The default profile is '$(if ($Profile) { $Profile } else { 'opencode-go' })'."
     $secure = Read-Host -AsSecureString "API key"
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
     try {
