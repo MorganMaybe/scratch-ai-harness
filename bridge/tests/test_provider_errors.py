@@ -501,7 +501,7 @@ def test_no_reasoning_tokens_with_thinking_off_does_not_warn(caplog, reasoning_t
 
 def test_success_populates_usage_latency_and_finish_reason():
     provider = make_provider(retries=2)
-    provider.client = FakeClient([FakeCompletion(finish_reason="stop")], delay=0.01)
+    provider.client = FakeClient([FakeCompletion(finish_reason="stop")], delay=0.05)
 
     reply = provider.complete(make_request())
 
