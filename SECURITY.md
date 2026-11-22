@@ -2,7 +2,7 @@
 
 This is a local tool with two things worth being careful about: your API key,
 and a dev control server that's more exposed than I'd like. Both are covered
-below, plainly.
+below, plainly. this is also vibecoded so treat is as radioative security wise
 
 ## API key
 
