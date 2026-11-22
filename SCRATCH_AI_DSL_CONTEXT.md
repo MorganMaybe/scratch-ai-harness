@@ -198,9 +198,9 @@ delete_script(script_id)
 - `duplicate_sprite` copies costumes, variables and properties, **not**
   scripts. `delete_sprite` removes an AI-created sprite and its scripts.
   `set_sprite` changes properties at apply time; omitted fields stay unchanged.
-- Negative numbers are unary minus and are rejected. Create at a non-negative
-  position, then place the sprite with `goto_xy(0 - 100, 0 - 80)` in a script;
-  use `direction=270` for left.
+- Negative literals are fine in call arguments (`x=-100`, `random(-20, 20)`,
+  `turn_right(-15)`); unary minus on a computed value is rejected — write
+  `0 - x`. For a left-facing sprite use `direction=270`.
 - `=None` in a signature means the argument is optional: omit it. Do not pass
   `None`; the `None` literal itself is rejected.
 - Module-level assignments are not allowed; create variables and lists with
