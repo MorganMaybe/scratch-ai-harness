@@ -49,6 +49,8 @@ class ModuleParam:
     required: bool = False
     default: Any = None
     menu: tuple[str, ...] = ()
+    #: Display-only example for the API reference; never a parse default.
+    example: Any = None
 
 
 @dataclass(frozen=True)
@@ -67,8 +69,9 @@ def _param(
     required: bool = False,
     default: Any = None,
     menu: tuple[str, ...] = (),
+    example: Any = None,
 ) -> ModuleParam:
-    return ModuleParam(name, type, required, default, menu)
+    return ModuleParam(name, type, required, default, menu, example)
 
 
 MODULE_CALL_SPECS: dict[str, ModuleCallSpec] = {
@@ -129,7 +132,7 @@ MODULE_CALL_SPECS: dict[str, ModuleCallSpec] = {
         "create_sprite",
         (
             _param("name", "string", required=True),
-            _param("costumes", "strings"),
+            _param("costumes", "strings", example=["Animals/crab1-a.png"]),
             _param("preset", "string"),
             _param("x", "number", default=0),
             _param("y", "number", default=0),
@@ -233,6 +236,8 @@ def _signature(spec: BlockSpec) -> str:
 def _default_text(value: Any) -> str:
     if isinstance(value, str):
         return '"' + value + '"'
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(f'"{item}"' for item in value) + "]"
     return repr(value)
 
 
@@ -241,6 +246,8 @@ def _module_signature(spec: ModuleCallSpec) -> str:
     for param in spec.params:
         if param.required:
             parts.append(param.name)
+        elif param.example is not None:
+            parts.append(f"{param.name}={_default_text(param.example)}")
         elif param.default is not None:
             parts.append(f"{param.name}={_default_text(param.default)}")
         else:

@@ -60,12 +60,12 @@ LAMBDA_MESSAGE = (
 )
 CLASS_MESSAGE = "classes are not part of the dialect."
 SUBSCRIPT_MESSAGE = (
-    "indexing is not part of the dialect; use list_item(\"list\", index) - "
+    "indexing is not part of the dialect; use list_item(index, \"list\") - "
     "Scratch list indices start at 1."
 )
 ATTRIBUTE_MESSAGE = (
     "attribute access is not part of the dialect; use "
-    'attribute_of("sprite", "x position") to read another sprite\'s property.'
+    'attribute_of("x position", "sprite") to read another sprite\'s property.'
 )
 COMPR_MESSAGE = (
     "comprehensions are not part of the dialect; build lists with "
@@ -144,7 +144,7 @@ STAR_MESSAGE = (
 )
 LOOPVAR_MESSAGE = (
     "the loop variable must be _ (Scratch repeat has no loop variable); to "
-    'walk a list use list_item("list", i) with a counter variable and while.'
+    'walk a list use list_item(i, "list") with a counter variable and while.'
 )
 RANGE2_MESSAGE = (
     "range(a, b) is not supported yet; write for _ in range(b - a) instead."
@@ -936,7 +936,7 @@ class _Transpiler:
         ):
             raise DSLError(
                 "for loops only support range(n); to walk a list use "
-                'list_item("list", i) with a counter variable and while.',
+                'list_item(i, "list") with a counter variable and while.',
                 line=_line(call) or node.lineno,
             )
         if call.keywords or len(call.args) != 1:
