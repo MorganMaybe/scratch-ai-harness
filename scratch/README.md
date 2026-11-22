@@ -1,6 +1,7 @@
 # Scratch runtime lives here
 
-This folder is intentionally almost empty in the source repository.
+This folder is almost empty in the source repository on purpose. It's where the
+Scratch 1.4 VM and its images go, and none of that gets committed.
 
 `scratch\base\` is the working directory for the Scratch 1.4 VM. It needs:
 
@@ -28,6 +29,10 @@ Scratch 1.4 media in the right places.
    `Media`, `Help`, `locale` and `Projects` into this folder.
 3. Copy `ScratchAIRelease.image` and `ScratchAIRelease.changes` from the
    release download into this folder.
-4. Run `..\..\run_release.ps1` from the repository root.
+4. From the repository root, run `.\run_release.ps1`.
 
-Never commit this folder. Everything in it except `.gitkeep` is ignored.
+## Keep it out of git
+
+Never commit this folder. Everything in it except `.gitkeep` is git-ignored, and
+it should stay that way. Images and media are big, and the Scratch 2.0 material
+in particular can't be redistributed.

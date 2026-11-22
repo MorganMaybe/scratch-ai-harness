@@ -1,16 +1,17 @@
-# Scratch AI Harness — HANDOFF
+# Scratch AI Harness: handoff
 
-**Date:** 2026-11-22 (release prep, fork and bundle)  
-**Status:** release image verified; 407 offline tests pass on a fresh clone.  
-**Repo:** https://github.com/MorganMaybe/scratch-ai-harness — a fork of
-[`scratchfoundation/Scratch_1.4`](https://github.com/scratchfoundation/Scratch_1.4).  
+**Date:** 2026-11-22
+**Status:** release image verified. The 407 offline tests pass on a fresh clone.
+**Repo:** https://github.com/MorganMaybe/scratch-ai-harness, a fork of
+[`scratchfoundation/Scratch_1.4`](https://github.com/scratchfoundation/Scratch_1.4).
 **Start here:** [`README.md`](README.md) and [`QUICKSTART.md`](QUICKSTART.md).
-The previous detailed handoff (session 22) is preserved at
-[`docs/HANDOFF-2026-11-15.md`](docs/HANDOFF-2026-11-15.md).
 
----
+This is the current state of the project: what works, what doesn't, and how to
+pick it up. The long session-by-session history lives in
+[`docs/HANDOFF-2026-11-15.md`](docs/HANDOFF-2026-11-15.md), and I've left it
+alone on purpose.
 
-## 1. What is in this drop
+## 1. Where things stand
 
 | Piece | State |
 |---|---|
@@ -18,39 +19,43 @@ The previous detailed handoff (session 22) is preserved at
 | Docked Chat / Bridge / Usage rail | Working |
 | Change sets: scripts, vars, lists, sprites, costumes, backdrops, stage | Working |
 | Undo, ownership, registry reconcile | Working |
-| Lazy context packs + sprite script detail | Working |
+| Lazy context packs and sprite script detail | Working |
 | Python bridge, validator, compiler, providers | Working |
 | **Release image (windowed, no control server)** | **Verified** |
-| **Release bundle (stock media, no secrets)** | **Built, ~50.6 MB** |
-| Tests | **407 passed, 2 skipped** (fresh clone, media fixture) |
+| **Release bundle (stock media, no secrets)** | **Built, about 50.6 MB** |
+| Tests | **407 passed, 2 skipped** on a fresh clone (media fixture) |
 | Live model path | `opencode-go` → `deepseek-v4.1-flash` |
+
+The Usage page's Model row also has a small switcher between the two
+`opencode-go` models listed in `bridge/config.py` (`MODEL_CHOICES`). It's only
+offered for that profile.
 
 ### Images
 
 | Image | Role |
 |---|---|
-| `ScratchAIRelease.image` | **End-user release.** Normal window, `fillScreenOn` with `TakeOverScreen` off so the frame and rail fill the client area with no turquoise World border. No 8767 control server, no dev watchdog, no Reload UI; release-only **Quit** button. Clean Cat project, chat rail, welcome line. |
-| `ScratchAiTesting.image` | **Dev image.** Control server on 8767, dev dialog policy, Reload UI. Use `ai_control.py` and `scope` probes here. |
+| `ScratchAIRelease.image` | **End-user release.** Opens in a normal 1400×900 window. The Scratch frame and rail fill the client area, with no turquoise World border. Scratch's `fillScreenOn` runs with `TakeOverScreen` off. No 8767 control server, no dev watchdog, no Reload UI. The rail has a release-only **Quit** button. Starts on a clean Cat project. |
+| `ScratchAiTesting.image` | **Dev image.** Control server on 8767, dev dialog policy, Reload UI. Use `ai_control.py` and the `scope` probes here. |
 | `ScratchDev.image` | Artifact of `tools\build_image.ps1`. |
 
 Both images live in `scratch\base`, which is git-ignored. The release bundle
-places them there.
+puts them there.
 
 ### Release mode
 
 `image\40_release_image.st` is loaded last. It stores
 `AIHarnessReleaseMode = true` and overrides `AIHarness class>>startUp`:
 
-- skips `startDevServer` and the watchdog;
-- forces `devMode` false;
+- skips `startDevServer` and the watchdog, and forces `devMode` to false;
 - closes Squeak `SystemWindow`s and `DialogBoxMorph`s;
-- calls `ScratchFrameMorph takeOverScreen: false` then `fillScreenOn`, so the
-  frame fills the VM client area but the OS title bar stays (the Squeak Windows
-  VM ignores the title-bar close button, so the rail also gets a **Quit** button);
-- keeps the async dispatcher (chat Send needs it);
+- calls `ScratchFrameMorph takeOverScreen: false`, then `fillScreenOn`. The
+  frame fills the VM's client area and the window keeps its normal title bar.
+  The Squeak Windows VM ignores the title-bar close button, which is why the
+  rail has a **Quit** button and the runtime sets `EnableAltF4Quit=1`;
+- keeps the async dispatcher, since chat Send depends on it;
 - removes the Reload UI button;
-- `saveReleaseAs:` cleans the project, writes the release pair, and defers the
-  snapshot by 0.5 s so the control reply is not replayed.
+- makes `saveReleaseAs:` clean the project, write the release pair, and defer
+  the snapshot by 0.5 s so the control reply doesn't get replayed.
 
 Build it with:
 
@@ -59,9 +64,7 @@ Build it with:
 ```
 
 The builder loads `17c → 16b → 22 → 38 → 29 → 40` into a temporary copy of
-`ScratchAiTesting`, so it does not depend on the seed's older methods.
-
----
+`ScratchAiTesting`, so it doesn't depend on the older methods in the seed.
 
 ## 2. Quick start (dev)
 
@@ -75,7 +78,7 @@ python tools\ai_control.py status
 .\run_bridge.ps1                  # deterministic mock
 ```
 
-Useful:
+Useful commands:
 
 ```powershell
 python tools\ai_control.py send --async "make the hexagon bigger" --wait
@@ -87,41 +90,37 @@ python tools\audit.py list
 
 ### Ports and network
 
-- **8765** — Python chat bridge. Binds `127.0.0.1` only.
-- **8767** — Squeak dev control server. The 2009 Squeak `Socket>>listenOn:`
-  API cannot bind loopback, so it listens on `0.0.0.0:8767`. Windows Firewall
-  prompts. Do not run the dev image on an untrusted network. Set
-  `controlServer=off` in `scratch\base\harness.ini` to skip it. The release
-  image never starts it.
+- **8765**: Python chat bridge. Binds `127.0.0.1` only.
+- **8767**: Squeak dev control server. The 2009 `Socket>>listenOn:` API can't
+  bind loopback, so it listens on `0.0.0.0:8767` and Windows Firewall prompts.
+  Don't run the dev image on an untrusted network. Set `controlServer=off` in
+  `scratch\base\harness.ini` to skip it. The release image never starts it.
 - Model calls are **outbound** from Python to the configured profile endpoint
-  (`opencode.ai` or `api.deepseek.com`). Scratch itself does not call the model.
-
----
+  (`opencode.ai` or `api.deepseek.com`). Scratch itself never calls the model.
 
 ## 3. Model connection
 
-Profiles are in `bridge\harness.ini` (copy from `harness.ini.example`):
+Profiles live in `bridge\harness.ini`, which you create from
+`harness.ini.example`:
 
-| Profile | Model / endpoint |
+| Profile | Model and endpoint |
 |---|---|
 | `opencode-go` (default) | `deepseek-v4.1-flash` at `https://opencode.ai/inference/go/openai/v1` |
 | `deepseek-direct` | `deepseek-chat` at `https://api.deepseek.com` |
-| `local` | Ollama/OpenAI-compatible at `127.0.0.1:11434` |
+| `local` | Ollama or OpenAI-compatible server at `127.0.0.1:11434` |
 | `mock` | offline canned scenes |
 
-The key is read from `DEEPSEEK_API_KEY` / `OPENCODE_GO_API_KEY` or
-`bridge\.deepseek_key`. It is never written to the image, a project, a log or
+The key comes from `DEEPSEEK_API_KEY`, `OPENCODE_GO_API_KEY` or
+`bridge\.deepseek_key`. It never gets written to the image, a project, a log or
 a prompt.
 
-Budgets: 120 s per attempt, 240 s per turn, 16 384 output tokens, 2 transport
-retries, 2 repairs, 80 000-character prompt budget. Hidden reasoning is
-explicitly disabled on `opencode-go`; prefer `deepseek-v4.1-flash`, which honors
-it.
+Budgets: 120 s per attempt, 240 s per turn, 16,384 output tokens, 2 transport
+retries, 2 repairs, and an 80,000-character prompt budget. Hidden reasoning is
+explicitly disabled on `opencode-go`. Prefer `deepseek-v4.1-flash`, which honors
+that setting.
 
-Audit is **off** in `run_live.ps1` for a public build. Opt in with
-`-Audit full`; bundles contain prompts and raw replies, so keep them local.
-
----
+Audit is **off** in `run_live.ps1`. Turn it on with `-Audit full` for a single
+run. Bundles contain prompts and raw replies, so keep them local.
 
 ## 4. Tests
 
@@ -134,10 +133,10 @@ python tools\check_st.py     # every image/*.st
 ```
 
 `bridge\tests\conftest.py` generates a small media fixture when
-`scratch\base\Media` is missing, so CI and a fresh clone do not need the
-runtime. `HARNESS_MEDIA_ROOT` overrides the media root.
+`scratch\base\Media` is missing, so CI and a fresh clone don't need the runtime.
+`HARNESS_MEDIA_ROOT` overrides the media root.
 
-The deterministic image path is:
+The deterministic image path:
 
 ```powershell
 python tools\mock_scene_bridge.py
@@ -147,77 +146,84 @@ python tools\ai_control.py undo
 
 The manual release checklist is in [`TESTING.md`](TESTING.md).
 
----
-
 ## 5. Media and licensing
 
 The public release bundle contains **stock Scratch 1.4 media only**. The
-locally imported Scratch 2.0 libraries are not redistributed. The bundle
+Scratch 2.0 libraries I imported locally aren't redistributed. The bundle
 builder:
 
 - excludes `Media/Scratch2`, `Media/Sounds/Scratch2` and `Costumes/Bundles`;
-- drops files whose stems are in `tools\scratch2_only_stems.txt`;
-- removes Scratch 2.0 preset groups from the bundled `media_groups.json`;
-- drops curated paths that are not in the staged media.
+- drops files whose stems are listed in `tools\scratch2_only_stems.txt`;
+- removes the Scratch 2.0 preset groups from the bundled `media_groups.json`;
+- drops curated paths that aren't in the staged media.
 
-The repo is GPLv2 (see `LICENSE`, `NOTICE`, `gpl-2.0.txt`). Scratch, the
-Scratch logo, Scratch Cat and Gobo are trademarks; this is an unofficial mod.
-A substantially modified public build should replace the name/logo/character
-art. See `TRADEMARK_POLICY`.
-
----
+The repo is GPLv2 (see `LICENSE`, `NOTICE` and `gpl-2.0.txt`). Scratch, the
+Scratch logo, Scratch Cat and Gobo are trademarks, and this is an unofficial
+mod. A substantially modified public build should replace the name, logo and
+character art. See `TRADEMARK_POLICY`.
 
 ## 6. Working rules
 
-1. Drive the dev image through `tools\ai_control.py`; do not click/focus it.
-2. One bridge owns 8765. Use `run_live.ps1 -Reuse` or `tools\stop_bridge.ps1`.
-3. Never Ctrl+V in the image; use Alt+V only for manual paste.
-4. A modal wedges the dispatcher. Screenshot first, dismiss, retry.
-5. Use `17c_loader_fix.st`'s loader, not the old `16a`/`17_safe_dialogs` one.
-6. Run `python tools\check_st.py` before loading a changed `.st`.
+1. Drive the dev image through `tools\ai_control.py`. Don't click into it or
+   focus it.
+2. One bridge owns 8765. Use `run_live.ps1 -Reuse`, or `tools\stop_bridge.ps1`.
+3. Never Ctrl+V in the image. Use Alt+V only for a manual paste.
+4. A modal wedges the dispatcher. Screenshot first, dismiss it, then retry.
+5. Use the `17c_loader_fix.st` loader. `17_safe_dialogs.st` still supplies the
+   dialog patches, but its older `load:` method must not be the one in use.
+   Don't use the `16a_notifier.st` loader; it reports success without
+   executing.
+6. Run `python tools\check_st.py` before loading a changed `.st` file.
 7. Never touch `Scratch.pristine.*`.
-8. Keep keys out of everything: image, projects, logs, screenshots, commits.
+8. Keep keys out of everything: the image, projects, logs, screenshots and
+   commits.
 9. Rebuild the clean dev image with `.\tools\make_clean_image.ps1`.
 10. Rebuild the release image with `.\tools\make_release_image.ps1 -Force`.
 11. Rebuild the public bundle with
     `.\tools\make_release_bundle.ps1 -Version <x.y.z> -Force`.
-12. `scratch\base\audit\`, `sessions\`, `tools\media_groups_work\` and runtime
-    media are local/git-ignored.
+12. `scratch\base\audit\`, `sessions\`, `tools\media_groups_work\` and the
+    runtime media are local and git-ignored.
 
----
+## 7. Known gaps
 
-## 7. Next steps
+What's missing, and what I'd try next, roughly in order:
 
-1. **User-script editing with confirmation.** User scripts are still read-only.
+1. **Editing user-created scripts with confirmation.** They're still read-only.
 2. **Cross-sprite variables.** Validation rejects writing another sprite's
-   local variable; add an appendix rule and/or UI affordance.
-3. **Control-server loopback.** Squeak 2.8 cannot bind a single interface.
-   A small local proxy or reverse-connect transport would remove the
+   local variable. That needs an appendix rule, a UI affordance, or both.
+3. **Loopback control server.** Squeak 2.8 can't bind a single interface. A
+   small local proxy or reverse-connect transport would remove the
    `0.0.0.0:8767` exposure and the firewall prompt.
-4. **Import gaps:** sound import, `.sprite` bundle import, sound editor.
-5. **Model quality loop:** use `-Audit full`, `audit.py score`, and measure
-   plan → per-script chunks.
-6. **Trademark-safe branding** before a wide public distribution.
+4. **Import gaps:** sound import, `.sprite` bundle import and a sound editor.
+5. **Model quality loop:** use `-Audit full`, `audit.py score`, and try a plan
+   followed by per-script chunks. I haven't measured that yet.
+6. **Trademark-safe branding** before any wide public distribution.
 
----
+Also not there yet: chat history in requests, exact per-turn token accounting
+(the Usage page's **Last turn** is a request-count delta), and full asset
+import for every PNG variant (BMP covers the round trip). The Bridge tab can
+start the bridge but not stop it. Stop it by closing its launcher console, or
+with `tools\stop_bridge.ps1`. Profile and audit changes still come from
+`run_live.ps1` flags.
 
 ## 8. Where the detail lives
 
 | File | What |
 |---|---|
-| `README.md` | public overview, install, release bundle |
+| `README.md` | overview, install, release bundle |
 | `QUICKSTART.md` | tester path |
-| `TESTING.md` | automated + manual checklist |
+| `TESTING.md` | automated tests and the manual release checklist |
 | `CONTRIBUTING.md` | dev workflow and media rules |
 | `SECURITY.md` | key handling, ports, audit privacy |
-| `ARCHITECTURE.md` | design rationale, protocol |
-| `SCRATCH_AI_CONTEXT.md` | model appendix sent every prompt |
+| `RELEASE_NOTES.md` | what shipped in each release |
+| `ARCHITECTURE.md` | design rationale and protocol |
+| `SCRATCH_AI_CONTEXT.md` | model appendix sent with every prompt |
 | `context/` | lazy packs: clones, games, scrolling, pen-3d |
-| `SPRITE_STAGE_SCOPE.md` | sprite/stage as-built |
+| `SPRITE_STAGE_SCOPE.md` | sprite and stage, as built |
 | `DEEPSEEK_CONNECTION_SCOPE.md` | connection package |
 | `CHAT_UI_SCOPE.md` | docked rail |
-| `SCRATCH_2_FEATURE_AUDIT.md` | clones/BYOB audit |
-| `docs/SQUEAK_NOTES.md` | 60 Squeak/Scratch traps |
-| `docs/HANDOFF-2026-11-15.md` | session-22 detailed handoff |
+| `SCRATCH_2_FEATURE_AUDIT.md` | clones and BYOB audit |
+| `docs/SQUEAK_NOTES.md` | the Squeak and Scratch traps |
+| `docs/HANDOFF-2026-11-15.md` | session-22 detailed handoff (historical) |
 | `docs/UI_TOUR.md` | rail ↔ native pane map |
-| `image/README.md` | Squeak-side step-by-step |
+| `image/README.md` | Squeak-side step-by-step setup |

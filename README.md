@@ -1,35 +1,44 @@
 # Scratch AI Harness
 
-A conversational coding harness built into **Scratch 1.4**. Chat with an AI
-agent, have it edit real Scratch blocks in the live project, run the project,
-and iterate — without leaving Scratch.
+This is a personal project of mine: a chat panel bolted onto the side of
+Scratch 1.4. You type what you want ("make the cat draw a spinning hexagon"), a
+language model writes it as real Scratch blocks in the project that's open, and
+you press the green flag to see whether it worked. If it didn't, there's an
+Undo button.
 
-This is an unofficial mod of [Scratch 1.4](https://github.com/scratchfoundation/Scratch_1.4)
+It's an unofficial mod of [Scratch 1.4](https://github.com/scratchfoundation/Scratch_1.4)
 (GPLv2). It is not affiliated with or endorsed by the Scratch Foundation.
 
 ![Scratch AI Harness in windowed release mode](docs/media/release-windowed.png)
 
 ## What it does
 
-- A Scratch-styled **Chat / Bridge / Usage** rail docked into the real Scratch
-  frame.
-- The model returns a JSON block IR; Python validates it, compiles it to native
-  Scratch tuples, and Squeak builds real `BlockMorph` stacks.
-- Add / replace / delete scripts, variables, lists, sprites, costumes,
+- A Chat / Bridge / Usage rail docked on the right side of the real Scratch
+  window.
+- The model replies with a JSON description of blocks. Python checks it,
+  compiles it into native Scratch block tuples, and Squeak builds real
+  `BlockMorph` stacks out of them.
+- It can add, replace and delete scripts, variables, lists, sprites, costumes,
   backdrops and stage scripts.
-- Per-turn project context (sprites, scripts, ownership, media) plus lazy
-  context packs (`clones`, `games`, `scrolling`, `pen-3d`).
-- Undo the last change set; user-created scripts stay read-only.
-- Async send/stop, token usage, an offline mock profile, record/replay and an
-  opt-in audit bundle for model debugging.
+- Every request carries the current project: sprites, scripts, ownership and
+  media. A few optional context packs (`clones`, `games`, `scrolling`,
+  `pen-3d`) are loaded only when the model asks for them.
+- Undo reverts the last change set. Scripts you wrote by hand are read-only as
+  far as the harness is concerned. It won't touch them.
+- Sends run in the background, with a Stop button. There's token usage on the
+  Usage page, an offline mock profile for testing without a network, and an
+  opt-in audit log for figuring out why a model turn went wrong.
 
 ## Try the release build
+
+If you just want to kick the tires, the [QUICKSTART](QUICKSTART.md) is the
+short version of this section.
 
 ### 1. Download
 
 Grab the latest **`ScratchAIHarness-<version>.zip`** from
-[GitHub Releases](https://github.com/MorganMaybe/scratch-ai-harness/releases),
-or build it locally (see *Development*).
+[GitHub Releases](https://github.com/MorganMaybe/scratch-ai-harness/releases)
+(0.1.0 is about 50.6 MB). Or build it yourself; see [Development](#development).
 
 The bundle contains:
 
@@ -42,11 +51,23 @@ bridge/                      local model bridge (Python)
 tools/                       control, audit, media and image helpers
 ```
 
-The release image is an **end-user** image: it opens in a normal 1400×900
-window (configurable in `run_release.ps1`), the Scratch frame and chat rail fill
-the window client area with no turquoise World border, and the local control
-server and source-reload tools are off. It leaves only the Cat in a clean
-project. Close it with the rail **Quit** button, **File → Quit**, or **Alt+F4**.
+### The release image
+
+`ScratchAIRelease.image` is the end-user version. It opens in a normal
+1400×900 window with a title bar. The Scratch frame and the chat rail fill the
+window, and no turquoise Squeak World border shows around them. To pick a
+different size:
+
+```powershell
+.\run_release.ps1 -Width 1600 -Height 1000
+```
+
+The release image has no 8767 control server, no dev watchdog and no Reload UI.
+It starts with the Cat in a clean project and nothing else.
+
+To close it, use the rail's **Quit** button, **File → Quit**, or Alt+F4. The
+Squeak Windows VM ignores the title-bar X, so please don't rely on it. (The
+bundled runtime sets `EnableAltF4Quit=1`, which is why Alt+F4 works.)
 
 ### 2. Add your own API key
 
@@ -56,14 +77,16 @@ The image never contains a key. Store yours once:
 .\setup.ps1
 ```
 
-`setup.ps1` installs the Python bridge dependencies and asks for a masked key.
-It writes `bridge\.deepseek_key`, which is git-ignored. You can also set
-`DEEPSEEK_API_KEY` (or `OPENCODE_GO_API_KEY`) in the environment.
+`setup.ps1` installs the Python bridge dependencies and asks for your key. The
+key is masked as you type it and written to `bridge\.deepseek_key`, which is
+git-ignored. You can also set `DEEPSEEK_API_KEY` (or `OPENCODE_GO_API_KEY`) in
+the environment if you'd rather not have a file.
 
-The default profile is **`opencode-go` → `deepseek-v4.1-flash`**, tuned for this
-harness: hidden reasoning disabled, 120 s per attempt, 240 s per turn, 16 384
-output tokens, 80 000-character prompt budget. A direct DeepSeek key works with
-`-Profile deepseek-direct`; a local Ollama server works with `-Profile local`.
+The default profile is **`opencode-go` → `deepseek-v4.1-flash`**. I tuned the
+limits for this harness: hidden reasoning off, 120 seconds per attempt, 240
+seconds per turn, 16,384 output tokens and an 80,000-character prompt budget.
+If you have a direct DeepSeek key, use `-Profile deepseek-direct`. For a local
+Ollama server, use `-Profile local`.
 
 ### 3. Run
 
@@ -74,20 +97,22 @@ output tokens, 80 000-character prompt budget. A direct DeepSeek key works with
 Then:
 
 1. Click the **Bridge** tab in the right rail.
-2. Click **Start**. The bridge runs on `127.0.0.1:8765`.
+2. Click **Start**. The bridge listens on `127.0.0.1:8765`.
 3. Go back to **Chat**, type a request, and press **Send**.
 
-Try one of these first:
+Some prompts to start with:
 
 ```text
 make the cat draw a spinning hexagon
 build a simple platformer with a player, ground and coins
 make a bat that flies around and a starfield backdrop
 create a calculator with buttons, a display and plus/minus/equals
+make a pong game with a paddle, ball and score
 ```
 
-Blocks appear in the Scripts pane. Click the green flag to run them. Use
-**Undo** in the rail to revert the last change set.
+The blocks show up in the Scripts pane. Click the green flag to run them. If a
+change goes sideways, **Undo** in the rail reverts the last change set. Expect
+to go back and forth a bit; that's the job.
 
 ### Offline test (no key, no network)
 
@@ -95,7 +120,9 @@ Blocks appear in the Scripts pane. Click the green flag to run them. Use
 .\run_bridge.ps1      # deterministic mock bridge on 8765
 ```
 
-The Chat rail then gets canned scenes from `bridge/examples/`.
+The Chat rail then plays back canned scenes from `bridge/examples/`. This is
+the quickest way to check that the image, the rail and the apply path all work
+before you spend any tokens.
 
 ## Development
 
@@ -105,42 +132,47 @@ cd scratch-ai-harness
 .\setup.ps1 -Dev
 ```
 
-`-Dev` installs the bridge in editable mode with pytest and copies
-`bridge\harness.ini.example` to `bridge\harness.ini`.
+`-Dev` installs the bridge in editable mode along with pytest, and sets up
+`bridge\harness.ini` from the example. See [CONTRIBUTING.md](CONTRIBUTING.md)
+before you change anything.
 
 ### Runtime
 
-`scratch\base` is intentionally ignored by git. Either:
+`scratch\base` is git-ignored on purpose. It holds the Scratch VM, the media
+and the images, and none of that belongs in the repo. You have two options:
 
-- use the release bundle (it already has the runtime and both images), or
-- copy your own Scratch 1.4 runtime into `scratch\base`; see
+- Use the release bundle. It already has the runtime and both images.
+- Copy your own Scratch 1.4 runtime into `scratch\base`. See
   [`scratch/README.md`](scratch/README.md).
 
 ### Images
 
 | Image | Purpose |
 |---|---|
-| `ScratchAiTesting.image` | dev image: control server on 8767, dev dialogs, reload UI |
-| `ScratchAIRelease.image` | end-user image: windowed, fills the window, rail Quit button, no control server |
+| `ScratchAiTesting.image` | dev image: control server on 8767, dev dialogs, Reload UI |
+| `ScratchAIRelease.image` | end-user image: windowed, frame and rail fill the window, rail Quit button, no control server |
 | `ScratchDev.image` | artifact from `tools\build_image.ps1` |
 
-Rebuild the clean dev image while it is running:
+Rebuild the clean dev image while it's running:
 
 ```powershell
 .\tools\make_clean_image.ps1
 ```
 
-Rebuild the release image from a clean dev image:
+Rebuild the release image from the clean dev image:
 
 ```powershell
 .\tools\make_release_image.ps1 -Force
 ```
 
-`image\40_release_image.st` implements release mode: a stored flag makes
-`AIHarness class>>startUp` skip the 8767 server and the dev watchdog, close
-Squeak tool windows, call `fillScreenOn` with `TakeOverScreen` **off** (so the
-frame fills the normal window, not the whole display), add a release-only
-**Quit** button to the rail, and keep the chat rail plus the async dispatcher.
+`image\40_release_image.st` is where release mode lives. It is loaded last, and
+it stores a flag that makes `AIHarness class>>startUp` skip the 8767 server and
+the dev watchdog. It closes the Squeak tool windows and calls Scratch's
+`fillScreenOn` with `TakeOverScreen` **off**. That's the native Scratch
+mechanism for laying the frame out across the window. With takeover off, the
+frame fills the normal window instead of the whole display. Release mode also
+adds the release-only **Quit** button to the rail and keeps the chat rail and
+the async dispatcher.
 
 ### Build the image from source
 
@@ -159,7 +191,9 @@ python tools\ai_control.py undo
 python tools\ai_control.py doctor
 ```
 
-Ports: **8765** = chat bridge, **8767** = local dev control. Never expose 8767.
+Ports: **8765** is the chat bridge. **8767** is the dev control server. Never
+expose 8767. [SECURITY.md](SECURITY.md) explains why, and it's worth reading
+before you run the dev image anywhere that isn't your own desk.
 
 ### Tests
 
@@ -173,13 +207,14 @@ python tools\check_st.py        # static check every image/*.st
 ```
 
 The bridge tests generate a small media fixture when `scratch\base\Media` is
-missing, so they run on a fresh clone and in CI. Live model tests are opt-in:
+missing, so they run on a fresh clone and in CI. The live model tests are
+opt-in:
 
 ```powershell
 python -m pytest -q -m live
 ```
 
-See [`TESTING.md`](TESTING.md) for the deterministic mock scene and the manual
+[TESTING.md](TESTING.md) covers the deterministic mock scene and the manual
 release checklist.
 
 ## How it works
@@ -193,12 +228,14 @@ Scratch image (Morphic)                     Python bridge (asyncio)
 ```
 
 Every request carries a full project snapshot. The model never sees Python or
-Smalltalk; it emits a JSON block IR change set. Validation is against the live
-context, so undo and manual edits reconcile on the next turn.
+Smalltalk. It emits a JSON block change set, and validation runs against the
+live project, so undo and manual edits get reconciled on the next turn.
 
-- Deep design: [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- Current as-built state and traps: [`HANDOFF.md`](HANDOFF.md)
-- Sprite/stage work package: [`SPRITE_STAGE_SCOPE.md`](SPRITE_STAGE_SCOPE.md)
+Further reading, in roughly the order you'd want it:
+
+- Design and protocol: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Where things stand right now: [`HANDOFF.md`](HANDOFF.md)
+- Sprite and stage work: [`SPRITE_STAGE_SCOPE.md`](SPRITE_STAGE_SCOPE.md)
 - Connection layer: [`DEEPSEEK_CONNECTION_SCOPE.md`](DEEPSEEK_CONNECTION_SCOPE.md)
 - Chat rail: [`CHAT_UI_SCOPE.md`](CHAT_UI_SCOPE.md)
 - Squeak traps: [`docs/SQUEAK_NOTES.md`](docs/SQUEAK_NOTES.md)
@@ -220,22 +257,40 @@ run_bridge.ps1           launch the deterministic mock bridge
 run_scratch.ps1          launch a dev image (control server)
 ```
 
+## Known limitations
+
+- User-created scripts are read-only. Editing them needs a confirmation flow
+  that doesn't exist yet.
+- Custom blocks, sound import and `.sprite` bundle import aren't exposed to the
+  harness.
+- The title-bar X in the release image doesn't close the app. Use **Quit**,
+  **File → Quit** or Alt+F4.
+- The dev control server listens on all interfaces. See
+  [SECURITY.md](SECURITY.md).
+- This is a 2009 Squeak image wearing a new hat. It works, but it has opinions
+  about modal dialogs, and it doesn't like being pasted into with Ctrl+V.
+
 ## Licensing and trademarks
 
 - The harness is released under **GPLv2**, matching the Scratch 1.4 source it
   modifies. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 - Scratch, the Scratch logo, Scratch Cat and Gobo are trademarks of the Scratch
-  Foundation. This project is an unofficial mod; see
+  Foundation. This project is an unofficial mod. See
   [`TRADEMARK_POLICY`](TRADEMARK_POLICY).
-- The release bundle contains **stock Scratch 1.4 media only**. The locally
-  imported Scratch 2.0 sprite/costume/sound libraries are not redistributed;
-  the bundle builder excludes them. See [`NOTICE`](NOTICE).
-- Your API key belongs in `bridge\.deepseek_key` or the environment. Never put
-  it in the image, a project, a log, a screenshot or a commit.
+- The release bundle contains **stock Scratch 1.4 media only**. The Scratch 2.0
+  sprite, costume and sound libraries I imported locally aren't redistributed,
+  and the bundle builder excludes them. See [`NOTICE`](NOTICE).
+- Your API key goes in `bridge\.deepseek_key` or the environment. Never put it
+  in the image, a project, a log, a screenshot or a commit.
 
 ## Status
 
-The end-to-end loop is verified live: chat → project context → bridge →
+The end-to-end loop has been run live: chat → project context → bridge →
 validate → apply real blocks → reply → undo. The Python suite has 407 offline
-tests (2 opt-in live tests) and passes on a fresh clone. See
-[`HANDOFF.md`](HANDOFF.md) for the current work package.
+tests and 2 opt-in live tests, and it passes on a fresh clone. CI runs on
+Windows and Linux with Python 3.11 and 3.13, and it's green. The static `.st`
+check runs there too.
+
+For what's done, what's missing and what I'd do next, see
+[`HANDOFF.md`](HANDOFF.md). Release history is in
+[`RELEASE_NOTES.md`](RELEASE_NOTES.md).
