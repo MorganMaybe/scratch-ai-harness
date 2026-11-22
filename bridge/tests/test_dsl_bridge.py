@@ -280,3 +280,39 @@ def test_openai_compat_json_path_still_parses_and_requests_an_object():
 
     assert reply.data == {"ok": True}
     assert provider.client.calls[0]["response_format"] == {"type": "json_object"}
+
+
+# -- user prompt mode awareness ------------------------------------------------
+
+
+def test_user_prompt_registry_hint_and_tail_follow_the_generator():
+    from harness.context import ProjectContext, ScriptSummary
+    from harness.prompts import build_user_prompt
+
+    context = ProjectContext.demo()
+    context.sprites["Sprite1"].scripts.append(
+        ScriptSummary(
+            script_id="ai-1",
+            target="Sprite1",
+            label="draw_square",
+            hat="EventHatMorph",
+            block_count=5,
+            owned=True,
+        )
+    )
+
+    json_prompt = build_user_prompt("make it bigger", context)
+    dsl_prompt = build_user_prompt("make it bigger", context, generator="dsl")
+
+    assert (
+        "Scripts (use the id for replace_script/delete_script):" in json_prompt
+    )
+    assert "Return the JSON change set now." in json_prompt
+    assert (
+        "Scripts (replace one by putting its script_id on the event decorator;"
+        " delete_script(script_id) removes):" in dsl_prompt
+    )
+    assert (
+        "Return the Scratch-Python module now, in one fenced python block."
+        in dsl_prompt
+    )

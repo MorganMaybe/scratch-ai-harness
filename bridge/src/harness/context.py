@@ -195,7 +195,7 @@ class ProjectContext:
                 result[script.script_id] = script
         return result
 
-    def summary_text(self) -> str:
+    def summary_text(self, generator: str = "json") -> str:
         lines = [f"Target: {self.target}"]
         lines.append("Sprites: " + ", ".join(self.sprites.keys()))
         if self.stage_variables:
@@ -235,7 +235,15 @@ class ProjectContext:
                 selected = f" (selected {stage.costumes[stage.costume_index - 1]})"
             lines.append("Backdrops: " + ", ".join(stage.costumes) + selected)
         if self.registry():
-            lines.append("Scripts (use the id for replace_script/delete_script):")
+            if generator == "dsl":
+                lines.append(
+                    "Scripts (replace one by putting its script_id on the "
+                    "event decorator; delete_script(script_id) removes):"
+                )
+            else:
+                lines.append(
+                    "Scripts (use the id for replace_script/delete_script):"
+                )
             for script in self.registry().values():
                 if script.owned:
                     owner = "ai-owned"

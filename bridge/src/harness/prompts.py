@@ -716,15 +716,18 @@ def _script_owner(script: ScriptSummary) -> str:
     return owner
 
 
-def _context_text(context: ProjectContext, level: int) -> str:
+def _context_text(
+    context: ProjectContext, level: int, generator: str = "json"
+) -> str:
     """Render the project context at a detail level (0 = today's full text).
 
     Level 1 drops per-script detail beyond id/label/hat/count (ownership is
     always kept), level 2 drops costume/sound lists, and level 3 reduces
-    variables and lists to bare names.
+    variables and lists to bare names.  ``generator`` only picks the registry
+    hint wording so the last line teaching revisions names the dialect's form.
     """
     if level <= 0:
-        return context.summary_text()
+        return context.summary_text(generator=generator)
 
     lines = [f"Target: {context.target}"]
     lines.append("Sprites: " + ", ".join(context.sprites.keys()))
@@ -757,7 +760,13 @@ def _context_text(context: ProjectContext, level: int) -> str:
             lines.append(f"{name}: " + "; ".join(parts))
     registry = context.registry()
     if registry:
-        lines.append("Scripts (use the id for replace_script/delete_script):")
+        if generator == "dsl":
+            lines.append(
+                "Scripts (replace one by putting its script_id on the event "
+                "decorator; delete_script(script_id) removes):"
+            )
+        else:
+            lines.append("Scripts (use the id for replace_script/delete_script):")
         for script in registry.values():
             lines.append(
                 f"  {script.script_id}: {script.label} / {script.hat} / "
@@ -885,18 +894,18 @@ def build_user_prompt_with_meta(
     request = "" if request is None else str(request)
     tail = _reply_tail(generator)
 
-    full_context = context.summary_text()
+    full_context = context.summary_text(generator=generator)
     full_prompt = _user_prompt(request, full_context, tail)
     if len(full_prompt) <= budget:
         return full_prompt, _user_meta(0, full_prompt, budget, full_context)
 
     for level in (1, 2, 3):
-        context_text = _context_text(context, level)
+        context_text = _context_text(context, level, generator)
         prompt = _user_prompt(request, context_text, tail)
         if len(prompt) <= budget:
             return prompt, _user_meta(level, prompt, budget, context_text)
 
-    compact = _context_text(context, 3)
+    compact = _context_text(context, 3, generator)
     prompt, dropped = _hard_user_fit(request, compact, budget, len(full_prompt), tail)
     return prompt, _user_meta(
         3, prompt, budget, compact, truncated=True, dropped_chars=dropped
