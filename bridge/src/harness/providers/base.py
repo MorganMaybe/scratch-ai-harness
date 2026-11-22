@@ -27,7 +27,7 @@ RETRYABLE_CODES = frozenset({"rate_limit", "timeout", "network", "server"})
 
 #: Failures where retrying cannot help: bad credentials, bad request, bad
 #: payload, or a caller-driven cancellation.
-TERMINAL_CODES = frozenset({"auth", "bad_request", "bad_json", "cancelled"})
+TERMINAL_CODES = frozenset({"auth", "bad_request", "bad_json", "cancelled", "replay"})
 
 ALL_CODES = RETRYABLE_CODES | TERMINAL_CODES
 
@@ -113,6 +113,9 @@ class ModelRequest:
     attempt: int = 1
     #: ``time.monotonic()`` deadline for the whole turn, if any.
     deadline: float | None = None
+    #: What the caller expects back: ``json`` (the change-set object) or
+    #: ``dsl`` (one Scratch-Python module in ``ModelReply.raw_text``).
+    reply_format: str = "json"
 
 
 @dataclass

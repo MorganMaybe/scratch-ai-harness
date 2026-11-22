@@ -12,6 +12,10 @@ Fixture format (one JSON object per line)::
 
 Only the prompt *hash* is stored. Prompts, system prompts, project context, and
 API keys never reach the fixture.
+
+DSL recordings add the raw module text, because that is their payload::
+
+     {"key": "...", "data": {}, "raw_text": "@on_flag(...)\ndef ..."}
 """
 
 from __future__ import annotations
@@ -51,7 +55,7 @@ def prompt_key(request: ModelRequest) -> str:
 
 
 def _reply_entry(request: ModelRequest, reply: ModelReply) -> dict[str, Any]:
-    return {
+    entry = {
         "key": prompt_key(request),
         "model": str(reply.model or ""),
         "usage": dict(reply.usage) if reply.usage is not None else None,
@@ -60,6 +64,11 @@ def _reply_entry(request: ModelRequest, reply: ModelReply) -> dict[str, Any]:
         "attempts": int(reply.attempts or request.attempt or 1),
         "data": reply.data,
     }
+    # A DSL reply's payload is the raw module; JSON recordings stay exactly as
+    # they were so old fixtures and the documented format keep working.
+    if request.reply_format == "dsl" and reply.raw_text is not None:
+        entry["raw_text"] = reply.raw_text
+    return entry
 
 
 def write_fixture(path: str | Path, entry: dict[str, Any]) -> Path:
@@ -163,6 +172,24 @@ class ReplayProvider(BaseProvider):
                 "bad_json",
                 "no replay fixture for this prompt",
                 retryable=False,
+            )
+        if request.reply_format == "dsl":
+            raw_text = entry.get("raw_text")
+            if not isinstance(raw_text, str):
+                raise ProviderError(
+                    "replay",
+                    "this replay recording has no raw DSL reply; re-record the "
+                    "turn with generator=dsl so raw_text is stored",
+                    retryable=False,
+                )
+            return ModelReply(
+                data={},
+                raw_text=raw_text,
+                model=str(entry.get("model") or ""),
+                latency_ms=0,
+                usage=copy.deepcopy(entry.get("usage")),
+                attempts=1,
+                finish_reason=entry.get("finish_reason"),
             )
         return ModelReply(
             data=copy.deepcopy(entry.get("data")),

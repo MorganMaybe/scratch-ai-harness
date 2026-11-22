@@ -7,6 +7,13 @@
 [model]
 default=opencode-go
 
+# Reply generator. Default json; HARNESS_GENERATOR overrides this value.
+#   json - the model returns the JSON change-set object (current default)
+#   dsl  - the model returns one fenced Scratch-Python module, which the
+#          bridge transpiles into the same change set
+# [harness]
+# generator=json
+
 [profile:opencode-go]
 # The verified live path (oc_sk_ key).
 base_url=https://opencode.ai/inference/go/openai/v1

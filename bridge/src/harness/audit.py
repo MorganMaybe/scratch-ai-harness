@@ -26,6 +26,7 @@ plan -> per-script chunk generator can read it:
         attempts/01/raw.txt
         attempts/01/parsed.json
         attempts/01/validation.json
+        attempts/01/dsl.json
         attempts/01/meta.json
         chunks/plan.json
         chunks/changes.json
@@ -150,6 +151,7 @@ class AuditStore:
         base_url: str = "",
         turn_budget_s: float = 0.0,
         context_literal: Any = None,
+        generator: str = "json",
     ) -> "TurnAudit | None":
         if not self.settings.enabled:
             return None
@@ -192,6 +194,7 @@ class AuditStore:
                 base_url=base_url,
                 turn_budget_s=turn_budget_s,
                 context_literal=context_literal,
+                generator=generator,
             )
         except Exception as exc:  # pragma: no cover - defensive
             log.warning(
@@ -281,6 +284,7 @@ class TurnAudit:
         base_url: str,
         turn_budget_s: float,
         context_literal: Any,
+        generator: str = "json",
     ):
         self.store = store
         self.root = root
@@ -294,6 +298,7 @@ class TurnAudit:
         self.model = model or ""
         self.base_url = base_url or ""
         self.turn_budget_s = float(turn_budget_s or 0.0)
+        self.generator = generator or "json"
         self._finished = False
 
         self._write_json(
@@ -304,6 +309,7 @@ class TurnAudit:
                 "request_id": self.request_id,
                 "started_at": self.started_at,
                 "mode": self.mode,
+                "generator": self.generator,
                 "profile": self.profile,
                 "model": self.model,
                 "base_url": self.base_url,
@@ -405,6 +411,7 @@ class TurnAudit:
         issues: list[Any] | None = None,
         fragment: bool = False,
         fragment_indices: list[int] | None = None,
+        dsl_errors: list[str] | None = None,
     ) -> None:
         if not self.full:
             return
@@ -468,6 +475,10 @@ class TurnAudit:
             items = [_issue_dict(issue) for issue in issues]
             self._write_json(f"{folder}/validation.json", items, full_only=True)
             meta["issue_count"] = len(items)
+        if dsl_errors is not None:
+            errors = [redact(str(error)) for error in dsl_errors]
+            self._write_json(f"{folder}/dsl.json", errors, full_only=True)
+            meta["dsl_error_count"] = len(errors)
         self._write_json(f"{folder}/meta.json", meta, full_only=True)
 
     @_guard

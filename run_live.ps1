@@ -7,11 +7,13 @@
 #   .\run_live.ps1 -Profile deepseek-direct
 #   .\run_live.ps1 -Audit full          # local prompt/model debugging
 #   .\run_live.ps1 -Reuse               # attach to an existing bridge
+#   .\run_live.ps1 -Generator dsl       # model writes Scratch-Python (json|dsl)
 param(
     [switch]$DebugLog,
     [switch]$Reuse,
     [string]$LogFile,
     [string]$Profile = "opencode-go",
+    [string]$Generator = "",
     [int]$PromptBudget = 80000,
     [ValidateSet("off", "meta", "full")]
     [string]$Audit = "off",
@@ -75,9 +77,15 @@ if (-not $env:DEEPSEEK_API_KEY) {
 }
 
 $env:PYTHONPATH = Join-Path $bridge "src"
+if ($Generator) {
+    $env:HARNESS_GENERATOR = $Generator
+}
 Set-Location $bridge
 
 Write-Host "bridge profile: $Profile (key loaded, not shown)"
+if ($Generator) {
+    Write-Host "reply generator: $Generator"
+}
 Write-Host "bridge log: $LogFile"
 if ($Audit -ne "off") {
     Write-Host "turn audit: $Audit -> $AuditDir (prompts and raw replies are saved locally)"

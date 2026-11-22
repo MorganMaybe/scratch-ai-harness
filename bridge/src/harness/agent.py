@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .block_ir import (
@@ -15,9 +15,11 @@ from .block_ir import (
     parse_context_request,
 )
 from .changeset import CompiledChangeSet, compile_changeset
+from .config import resolve_generator
 from .context import ProjectContext, ScriptSummary, SpriteContext
 from .context_doc import (
     ContextPackError,
+    DEFAULT_DSL_CONTEXT_DOC,
     available_context_packs,
     load_context_doc,
     load_context_packs,
@@ -25,11 +27,18 @@ from .context_doc import (
 from .llm import LLMClient
 from .prompts import (
     analyze_system_prompt,
+    build_dsl_system_prompt,
     build_system_prompt,
     build_user_prompt_with_meta,
     prompt_budget_chars,
 )
-from .providers.base import ModelReply, ModelRequest, ProviderError, remaining_seconds
+from .providers.base import (
+    ModelReply,
+    ModelRequest,
+    ProviderError,
+    parse_json_object,
+    remaining_seconds,
+)
 from .script_detail import (
     resolve_sprite_name,
     sprite_detail_index,
@@ -322,21 +331,29 @@ class Agent:
         self.context = context
         self.registry = context.registry()
 
-    def _loaded_sprite_detail(self, names: list[str]) -> str:
+    def _loaded_sprite_detail(
+        self, names: list[str], generator: str = "json"
+    ) -> str:
         parts: list[str] = []
         for name in names:
             canonical = resolve_sprite_name(self.context, name)
             if canonical is None:
                 continue
             sprite = self.context.sprites[canonical]
-            parts.append(
-                f"# Loaded sprite detail: {canonical}\n"
-                + sprite_detail_text(sprite)
-            )
+            if generator == "dsl":
+                from .dsl import render_sprite_detail
+
+                body = render_sprite_detail(sprite)
+            else:
+                body = sprite_detail_text(sprite)
+            parts.append(f"# Loaded sprite detail: {canonical}\n" + body)
         return "\n\n".join(parts)
 
     def _system_prompt(
-        self, packs: list[str], sprites: list[str] | None = None
+        self,
+        packs: list[str],
+        sprites: list[str] | None = None,
+        generator: str = "json",
     ) -> str:
         """Build the system prompt with the core appendix and loaded context.
 
@@ -345,10 +362,16 @@ class Agent:
         from the core guide, media index or catalog. The sprite index appears
         only when at least one AI-owned script has a body to show; the exact
         bodies appear only after the model requests them.
+
+        ``generator = dsl`` swaps the dialect appendix and the generated
+        Scratch-Python reference in; the control-channel index is unchanged.
         """
-        core = load_context_doc()
+        if generator == "dsl":
+            core = load_context_doc(DEFAULT_DSL_CONTEXT_DOC) or load_context_doc()
+        else:
+            core = load_context_doc()
         extra = load_context_packs(packs)
-        detail = self._loaded_sprite_detail(sprites or [])
+        detail = self._loaded_sprite_detail(sprites or [], generator)
         loaded = "\n\n".join(part for part in (extra, detail) if part)
         index = sprite_detail_index(self.context)
         budget = prompt_budget_chars()
@@ -359,7 +382,8 @@ class Agent:
             budget += len(loaded) + 2
         parts = [part for part in (loaded, index, core) if part]
         doc = "\n\n".join(parts)
-        return build_system_prompt(
+        builder = build_dsl_system_prompt if generator == "dsl" else build_system_prompt
+        return builder(
             target=self.context.target,
             budget_chars=budget,
             context_doc=doc,
@@ -377,11 +401,16 @@ class Agent:
         # Cancellation wins over everything else: a token set before the turn
         # means we must not call the provider at all.
         _raise_if_cancelled(token)
+        # Resolve once per turn so tests (and the smoke runner) can flip the
+        # environment between turns without restarting the bridge.
+        generator = resolve_generator()
         loaded_packs: list[str] = []
         loaded_sprites: list[str] = []
         context_loads = 0
-        system = self._system_prompt(loaded_packs, loaded_sprites)
-        user, user_meta = build_user_prompt_with_meta(request, self.context)
+        system = self._system_prompt(loaded_packs, loaded_sprites, generator)
+        user, user_meta = build_user_prompt_with_meta(
+            request, self.context, generator=generator
+        )
         if self.audit is not None:
             system_info = analyze_system_prompt(system)
             system_info["context_packs"] = list(loaded_packs)
@@ -424,7 +453,9 @@ class Agent:
                 raise error
 
             try:
-                reply = self._complete(system, user, request_id, attempt, deadline)
+                reply = self._complete(
+                    system, user, request_id, attempt, deadline, generator
+                )
             except ProviderError as exc:
                 if self.audit is not None:
                     self.audit.write_attempt(
@@ -463,12 +494,50 @@ class Agent:
                     break
                 repairs_used += 1
                 _raise_if_cancelled(token)
-                user = _repair_prompt(request, self.context, last_payload, last_issues)
+                if generator == "dsl":
+                    user = _dsl_repair_prompt(
+                        request, self.context, "", last_issues
+                    )
+                else:
+                    user = _repair_prompt(
+                        request, self.context, last_payload, last_issues
+                    )
                 continue
 
             # The provider may have answered while the client was cancelling:
             # discard that reply before it can become a result or touch state.
             _raise_if_cancelled(token)
+
+            # In DSL mode the reply payload is a raw Scratch-Python module.
+            # A JSON object is still accepted (control channel or a model
+            # fallback to the JSON change set); it goes through the existing
+            # JSON flow untouched.
+            dsl_source: str | None = None
+            dsl_changeset: ChangeSet | None = None
+            dsl_diagnostics: list[str] = []
+            if not reply.data and generator == "dsl" and reply.raw_text:
+                raw = str(reply.raw_text).strip()
+                json_fallback: dict | None = None
+                if raw.startswith("{"):
+                    try:
+                        candidate = parse_json_object(raw)
+                    except ProviderError:
+                        candidate = None
+                    if isinstance(candidate, dict):
+                        json_fallback = candidate
+                if json_fallback is not None:
+                    reply = replace(reply, data=json_fallback)
+                else:
+                    from .dsl import DSLError, DSLErrors, transpile
+
+                    dsl_source = raw
+                    fragment_mode = False
+                    try:
+                        dsl_changeset = transpile(raw, self.context)
+                    except DSLErrors as exc:
+                        dsl_diagnostics = [error.format() for error in exc.errors]
+                    except DSLError as exc:
+                        dsl_diagnostics = [exc.format()]
 
             # Lazy context: a reply may ask for optional topic docs and/or exact
             # sprite script bodies instead of a change set. Load them, rebuild
@@ -563,7 +632,7 @@ class Agent:
                 loaded_sprites.extend(sprites_to_load)
                 context_loads += 1
                 fragment_mode = False
-                system = self._system_prompt(loaded_packs, loaded_sprites)
+                system = self._system_prompt(loaded_packs, loaded_sprites, generator)
                 user = _context_loaded_prompt(
                     request, self.context, packs_to_load, sprites_to_load
                 )
@@ -585,7 +654,29 @@ class Agent:
                     self.audit.write_attempt(attempt, user_prompt=user, reply=reply)
                 continue
 
-            if fragment_mode:
+            if dsl_diagnostics:
+                last_issues = [
+                    ValidationIssue("dsl", text) for text in dsl_diagnostics
+                ]
+                if self.audit is not None:
+                    self.audit.write_attempt(
+                        attempt,
+                        user_prompt=user,
+                        reply=reply,
+                        parse_error="; ".join(dsl_diagnostics),
+                        issues=last_issues,
+                        dsl_errors=dsl_diagnostics,
+                    )
+                if repairs_used >= self.max_repairs:
+                    break
+                repairs_used += 1
+                _raise_if_cancelled(token)
+                user = _dsl_repair_prompt(
+                    request, self.context, dsl_source or "", last_issues
+                )
+                continue
+
+            if fragment_mode and generator == "json":
                 fragment_error = None
                 merged: ChangeSet | None = None
                 try:
@@ -646,56 +737,18 @@ class Agent:
                 )
                 continue
 
-            last_payload = reply.data
-            fragment_base = None
-            fragment_indices = []
-            parsed: ChangeSetParseResult = parse_changeset_partial(reply.data)
-            if parsed.top_level_error is not None:
-                last_issues = [
-                    ValidationIssue("json", str(parsed.top_level_error))
-                ]
-                if self.audit is not None:
-                    self.audit.write_attempt(
-                        attempt,
-                        user_prompt=user,
-                        reply=reply,
-                        parse_error=parsed.top_level_error,
-                        issues=last_issues,
-                    )
-            elif parsed.problems:
-                last_issues = [
-                    ValidationIssue(f"changes[{index}]", str(error))
-                    for index, error in parsed.problems
-                ]
-                if self.audit is not None:
-                    self.audit.write_attempt(
-                        attempt,
-                        user_prompt=user,
-                        reply=reply,
-                        parse_error="; ".join(str(error) for _, error in parsed.problems),
-                        issues=last_issues,
-                    )
-                if len(parsed.problems) <= _FRAGMENT_LIMIT:
-                    fragment_base = parsed.changes
-                    fragment_indices = [index for index, _ in parsed.problems]
-                    fragment_summary = parsed.summary
-                    fragment_notes = parsed.notes
-            else:
-                changeset = ChangeSet(
-                    summary=parsed.summary,
-                    changes=[
-                        change for change in parsed.changes if change is not None
-                    ],
-                    notes=parsed.notes,
-                )
+            if dsl_changeset is not None:
+                changeset = dsl_changeset
                 last_issues = validate_changeset(
                     changeset, self.context, self.registry
                 )
                 if self.audit is not None:
+                    # Store the emitted change set as parsed.json, as the JSON
+                    # path does, while raw.txt keeps the module source.
                     self.audit.write_attempt(
                         attempt,
                         user_prompt=user,
-                        reply=reply,
+                        reply=replace(reply, data=changeset.to_dict()),
                         issues=last_issues,
                     )
                 if not last_issues:
@@ -719,19 +772,101 @@ class Agent:
                         reasoning_tokens=reply.reasoning_tokens,
                         cached_tokens=reply.cached_tokens,
                     )
-                indices = _issue_change_indices(last_issues)
-                if indices and len(indices) <= _FRAGMENT_LIMIT:
-                    fragment_base = list(changeset.changes)
-                    fragment_indices = indices
-                    fragment_summary = changeset.summary
-                    fragment_notes = changeset.notes
+            else:
+                last_payload = reply.data
+                fragment_base = None
+                fragment_indices = []
+                parsed: ChangeSetParseResult = parse_changeset_partial(reply.data)
+                if parsed.top_level_error is not None:
+                    last_issues = [
+                        ValidationIssue("json", str(parsed.top_level_error))
+                    ]
+                    if self.audit is not None:
+                        self.audit.write_attempt(
+                            attempt,
+                            user_prompt=user,
+                            reply=reply,
+                            parse_error=parsed.top_level_error,
+                            issues=last_issues,
+                        )
+                elif parsed.problems:
+                    last_issues = [
+                        ValidationIssue(f"changes[{index}]", str(error))
+                        for index, error in parsed.problems
+                    ]
+                    if self.audit is not None:
+                        self.audit.write_attempt(
+                            attempt,
+                            user_prompt=user,
+                            reply=reply,
+                            parse_error="; ".join(str(error) for _, error in parsed.problems),
+                            issues=last_issues,
+                        )
+                    if generator == "json" and len(parsed.problems) <= _FRAGMENT_LIMIT:
+                        fragment_base = parsed.changes
+                        fragment_indices = [index for index, _ in parsed.problems]
+                        fragment_summary = parsed.summary
+                        fragment_notes = parsed.notes
+                else:
+                    changeset = ChangeSet(
+                        summary=parsed.summary,
+                        changes=[
+                            change for change in parsed.changes if change is not None
+                        ],
+                        notes=parsed.notes,
+                    )
+                    last_issues = validate_changeset(
+                        changeset, self.context, self.registry
+                    )
+                    if self.audit is not None:
+                        self.audit.write_attempt(
+                            attempt,
+                            user_prompt=user,
+                            reply=reply,
+                            issues=last_issues,
+                        )
+                    if not last_issues:
+                        compiled = compile_changeset(
+                            changeset, self.context, self.registry
+                        )
+                        if self.audit is not None:
+                            self.audit.write_compiled(changeset, compiled)
+                            self.audit.write_chunks(changeset, compiled)
+                        return AgentResult(
+                            request_id=request_id,
+                            summary=compiled.summary,
+                            changeset=changeset,
+                            compiled=compiled,
+                            apply_literal=compiled.apply_literal(request_id),
+                            attempts=attempt,
+                            model=reply.model,
+                            usage=reply.usage,
+                            latency_ms=reply.latency_ms,
+                            finish_reason=reply.finish_reason,
+                            reasoning_tokens=reply.reasoning_tokens,
+                            cached_tokens=reply.cached_tokens,
+                        )
+                    indices = _issue_change_indices(last_issues)
+                    if (
+                        generator == "json"
+                        and indices
+                        and len(indices) <= _FRAGMENT_LIMIT
+                    ):
+                        fragment_base = list(changeset.changes)
+                        fragment_indices = indices
+                        fragment_summary = changeset.summary
+                        fragment_notes = changeset.notes
 
             if repairs_used >= self.max_repairs:
                 break
             repairs_used += 1
             # Before each repair (the next loop iteration also re-checks).
             _raise_if_cancelled(token)
-            if fragment_base is not None and fragment_indices:
+            if dsl_source is not None:
+                user = _dsl_repair_prompt(
+                    request, self.context, dsl_source, last_issues
+                )
+            elif fragment_base is not None and fragment_indices:
                 fragment_mode = True
                 user = _fragment_repair_prompt(
                     request,
@@ -759,6 +894,7 @@ class Agent:
         request_id: int,
         attempt: int,
         deadline: float | None,
+        generator: str = "json",
     ) -> ModelReply:
         """One model call through the rich interface, with a legacy fallback."""
         complete = getattr(self.llm, "complete", None)
@@ -770,6 +906,7 @@ class Agent:
                     user=user,
                     attempt=attempt,
                     deadline=deadline,
+                    reply_format=generator,
                 )
             )
 
@@ -995,6 +1132,71 @@ Problems:
 {budget_note}{media_note}{var_note}{scope_note}{delta_note}{target_note}{menu_note}{stage_note}{block_note}
 Return a corrected JSON change set only. Keep the same schema and use only the
 block ops in the catalog. Do not repeat the previous mistakes.
+"""
+
+
+def _dsl_repair_prompt(
+    request: str,
+    context: ProjectContext,
+    raw_source: str,
+    messages: list[Any],
+) -> str:
+    """The full-module repair prompt for a rejected Scratch-Python reply."""
+    problems = "\n".join(f"- {message}" for message in messages) or "- invalid module"
+    media_note = ""
+    if any(
+        "unknown costume" in str(message) or "unknown backdrop" in str(message)
+        for message in messages
+    ):
+        media_note = """
+The media library is strict: every costume/backdrop must be an exact file that
+appears in the system prompt's media index. Replace the missing name with a
+listed asset, or omit the decorative sprite/costume and note the omission. Do
+not invent a path.
+"""
+    var_note = ""
+    if any("unknown variable" in str(message) for message in messages):
+        var_note = """
+Check whose variable it is. If it is another sprite's local variable, do not
+create a copy: use attribute_of/set_attribute_of/change_attribute_of on that
+sprite, or broadcast to a script owned by it. Create a variable before its
+first use in the module.
+"""
+    target_note = ""
+    if any("unknown target" in str(message) for message in messages):
+        target_note = """
+Every decorator target must exist when its def runs. Create the sprite earlier
+in the same module, or target an existing sprite/Stage. A later reference to a
+sprite the module never creates is an error.
+"""
+    stage_note = ""
+    if any("cannot be used on 'Stage'" in str(message) for message in messages):
+        stage_note = """
+The Stage cannot run motion, looks or sprite-only sensing blocks. Move that
+behavior to a sprite script, or use the stage-safe equivalents: switch_backdrop,
+variables, broadcast. See the Stage rules in the system prompt.
+"""
+    return f"""Your previous Scratch-Python module could not be used.
+
+User request:
+{request}
+
+Project context:
+{context.summary_text()}
+
+Previous module:
+{raw_source or "(no module)"}
+
+Problems:
+{problems}
+{media_note}{var_note}{target_note}{stage_note}
+Return the complete corrected module as ONE fenced python block. Fix every
+quoted line and keep the valid defs and module calls unchanged; do not switch
+to a JSON change set. Use only the dialect functions in the API reference.
+
+Control-channel replies stay JSON: when you need more context, return only
+{{"load_context": [...]}} or {{"load_sprite": [...]}} with a reason, never
+together with a module. Do not repeat the previous mistakes.
 """
 
 

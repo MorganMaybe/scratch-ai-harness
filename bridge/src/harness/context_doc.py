@@ -6,6 +6,11 @@ from pathlib import Path
 
 #: Default appendix next to the repository root.
 DEFAULT_CONTEXT_DOC = Path(__file__).resolve().parents[3] / "SCRATCH_AI_CONTEXT.md"
+#: Dialect appendix used when ``generator = dsl``; the JSON file stays the
+#: fallback when this one is missing.
+DEFAULT_DSL_CONTEXT_DOC = (
+    Path(__file__).resolve().parents[3] / "SCRATCH_AI_DSL_CONTEXT.md"
+)
 DEFAULT_CONTEXT_DIR = Path(__file__).resolve().parents[3] / "context"
 
 _PACK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")

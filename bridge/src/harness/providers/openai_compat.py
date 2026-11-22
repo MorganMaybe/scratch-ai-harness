@@ -177,8 +177,12 @@ class OpenAICompatProvider(BaseProvider):
             ],
             "temperature": config.temperature,
             "max_tokens": config.max_tokens,
-            "response_format": {"type": "json_object"},
         }
+        # The JSON change-set contract wants an object back.  A DSL reply is a
+        # fenced Python module, so an endpoint-enforced JSON object would
+        # contradict the prompt and the transpiler.
+        if request.reply_format != "dsl":
+            kwargs["response_format"] = {"type": "json_object"}
         # "off" must be sent explicitly.  Omitting the field lets a reasoning
         # model spend the whole completion budget on hidden reasoning and return
         # an empty ``content`` (finish_reason=length), which looks like bad JSON.
@@ -398,18 +402,23 @@ class OpenAICompatProvider(BaseProvider):
                 cached_tokens=cached_tokens,
             )
 
-        try:
-            data = parse_json_object(content)
-        except ProviderError as exc:
-            # Keep the exact content and budget diagnostics for the audit
-            # bundle.  The transport layer still does not retry bad_json; the
-            # agent's repair loop owns it.
-            exc.raw_text = content
-            exc.finish_reason = finish_reason
-            exc.reasoning_tokens = reasoning_tokens
-            exc.content_chars = len(content)
-            exc.cached_tokens = cached_tokens
-            raise
+        if request.reply_format == "dsl":
+            # The raw module is the payload; the agent transpiles it.  No JSON
+            # parse, but the usage/latency/finish diagnostics are identical.
+            data: dict[str, Any] = {}
+        else:
+            try:
+                data = parse_json_object(content)
+            except ProviderError as exc:
+                # Keep the exact content and budget diagnostics for the audit
+                # bundle.  The transport layer still does not retry bad_json; the
+                # agent's repair loop owns it.
+                exc.raw_text = content
+                exc.finish_reason = finish_reason
+                exc.reasoning_tokens = reasoning_tokens
+                exc.content_chars = len(content)
+                exc.cached_tokens = cached_tokens
+                raise
         thinking = str(self.config.thinking or "off").strip().lower()
         if reasoning_tokens and reasoning_tokens > 0 and thinking in {"off", "none", "disabled", "false"}:
             # The endpoint ignored the disable control: reasoning is eating the

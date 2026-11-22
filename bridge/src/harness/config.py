@@ -18,6 +18,11 @@ from typing import Any, Mapping
 
 DEFAULT_PROFILE = "opencode-go"
 
+#: Reply formats the model may be asked to produce.  ``json`` is the original
+#: contract; ``dsl`` asks for one Scratch-Python module that the bridge
+#: transpiles into the same change set.
+GENERATORS = ("json", "dsl")
+
 #: Models offered by the in-image Usage switcher, in bridge order (the image
 #: selects a model by 1-based index).  They share one profile and endpoint; a
 #: switch changes only the model id.  Keep labels short enough for the rail.
@@ -183,6 +188,48 @@ def read_ini(path: Path | None) -> tuple[str | None, dict[str, dict[str, str]]]:
         if values:
             profiles[name] = values
     return default, profiles
+
+
+def _read_harness_generator(path: Path | None) -> str | None:
+    """Read ``[harness] generator`` without touching :func:`read_ini`.
+
+    A missing file or section is not an error; a file that exists but cannot be
+    parsed is, matching ``read_ini``'s behaviour.
+    """
+    if path is None or not Path(path).exists():
+        return None
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        with open(path, encoding="utf-8-sig") as handle:
+            parser.read_file(handle)
+    except (OSError, configparser.Error) as exc:
+        raise ConfigError(f"cannot read config {path}: {exc}") from exc
+    if not parser.has_section("harness"):
+        return None
+    value = (parser.get("harness", "generator", fallback="") or "").strip()
+    return value or None
+
+
+def resolve_generator(
+    config_path: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """HARNESS_GENERATOR env > harness.ini [harness] generator > 'json'."""
+    env = os.environ if env is None else env
+    raw_env = (env.get("HARNESS_GENERATOR") or "").strip()
+    if raw_env:
+        value = raw_env.lower()
+        if value not in GENERATORS:
+            raise ConfigError("generator must be one of: json, dsl")
+        return value
+    path = Path(config_path) if config_path is not None else default_config_path()
+    raw_ini = _read_harness_generator(path)
+    if raw_ini:
+        value = raw_ini.lower()
+        if value not in GENERATORS:
+            raise ConfigError("generator must be one of: json, dsl")
+        return value
+    return "json"
 
 
 def resolve_config(

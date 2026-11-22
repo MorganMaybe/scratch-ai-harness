@@ -20,6 +20,7 @@ from .config import (
     MODEL_CHOICES,
     ModelConfig,
     resolve_config,
+    resolve_generator,
     with_overrides,
 )
 from .context import ProjectContext
@@ -392,6 +393,7 @@ class Bridge:
                 base_url=self.base_url,
                 turn_budget_s=self.turn_budget_s,
                 context_literal=context_literal,
+                generator=resolve_generator(),
             )
 
         # Fresh agent per request: only the provider is shared.  A request can

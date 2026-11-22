@@ -64,7 +64,7 @@ class MockProvider(BaseProvider):
 
     name = "mock"
 
-    def __init__(self, responses: list[dict[str, Any]] | None = None, config: Any = None):
+    def __init__(self, responses: list[Any] | None = None, config: Any = None):
         super().__init__(config)
         self.responses = list(responses or [])
         self.calls: list[ModelRequest] = []
@@ -74,11 +74,23 @@ class MockProvider(BaseProvider):
         started = time.monotonic()
         if not self.responses:
             raise ProviderError("bad_json", "mock provider has no responses left", retryable=False)
-        data = self.responses.pop(0)
+        response = self.responses.pop(0)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if isinstance(response, str):
+            # A string response is a raw reply (a Scratch-Python module in DSL
+            # mode); a dict is a parsed JSON change set, as before.
+            return ModelReply(
+                data={},
+                raw_text=response,
+                model="mock",
+                latency_ms=latency_ms,
+                attempts=request.attempt,
+                finish_reason="stop",
+            )
         return ModelReply(
-            data=data,
+            data=response,
             model="mock",
-            latency_ms=int((time.monotonic() - started) * 1000),
+            latency_ms=latency_ms,
             attempts=request.attempt,
             finish_reason="stop",
         )

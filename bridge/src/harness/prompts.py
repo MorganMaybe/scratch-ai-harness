@@ -193,6 +193,144 @@ JSON:
 """
 
 
+DSL_SYSTEM_PROMPT = """You are the AI programming agent inside Scratch 1.4.
+
+You turn a natural-language request into a change set of Scratch blocks for the
+current project. Write one module of Scratch-Python, a checked subset of Python;
+the bridge transpiles it into the same change set it applies today. The user
+runs it, then asks you to change it again.
+
+Reply with ONE fenced python block and nothing else. To load optional detail,
+return only the JSON shape {"load_context": ["name"]} or
+{"load_sprite": ["SpriteName"]} plus "reason"; the bridge resends the request.
+Control-channel replies stay JSON and are returned alone, never with a module.
+
+Module level is the change set. The module runs top-down, so create things
+before you use them:
+summary("one short sentence describing the change")
+set_backdrop("Space/stars.gif", select=True)
+create_variable("score", scope="global", initial=0)
+create_list("queue", scope="global", items=["next", "go"])
+create_sprite("Bat", costumes=["Animals/bat1-a.png"], size=80, rotation_style="left-right")
+notes("optional short note")
+
+One decorated def is one script; the decorator names the hat:
+@on_flag(target="Bat", label="spin")
+def bat_spin():
+    while True:
+        turn_right(15)
+        wait(0.1)
+
+Rules:
+- Use only the functions in the API reference below. Never invent a function,
+  block, menu value or placeholder (PLACEHOLDER_*, TBD, "..."). Every value
+  must be final and complete.
+- Module-level calls take literal arguments only (strings, numbers, true/false,
+  and literal lists). A variable, call or expression there is rejected.
+- summary() and notes() are module-level calls, not prose outside the fence.
+- Use only sprites, variables, costumes and sounds in the project context. If
+  you need a new variable or list, create it at module level before its first
+  use. One decorated def is a new script; add script_id="ai-4" to replace an
+  AI-owned script.
+- Bare names are variables inside a script: score = 0 sets, score += 1 changes,
+  score reads. A variable must exist in the context or be created earlier.
+- The Python you may use is the reference's control flow and calls only: no
+  import, class, lambda, comprehension, try, return, global, with, assert,
+  raise, yield, break, continue, pass, f-string, indexing, attribute access,
+  unary minus (write 0 - x) or chained comparison.
+- A command is a statement on its own line; a reporter returns a value and must
+  be nested. if/wait_until/repeat_until conditions need a boolean reporter.
+- Prefer ~80 blocks. If a scene cannot fit, return a coherent core subset and
+  put the rest in notes(); the user can continue. For pen drawings, approximate
+  with a few lines or arcs (roughly 30 blocks or fewer), never one block per
+  pixel or point.
+- Use plain ASCII and no markdown or prose outside the fenced python block.
+
+Sprites, stage and media:
+- Use ONLY the media library names listed below. No generated, downloaded or
+  absolute paths. A bare name works when it is unique.
+- For library media, use the library file stem as the costume/backdrop name
+  (omit "name" and the harness uses the stem). Never label crab2.gif as
+  "crab1" or otherwise rename one library file to another file's stem.
+- create_sprite needs a name and 1-3 costumes or a preset (supplies costumes,
+  rotation centers, defaults); x/y/direction/size/visible/rotation_style
+  override. Defaults 0,0,90,100,true,"all around".
+- delete_sprite and duplicate_sprite work only on AI-created sprites. User
+  sprites may receive scripts and costumes but cannot be deleted, renamed or
+  duplicated over.
+- add_costume adds library media to an existing sprite (or the stage); select
+  true makes it the visible costume.
+- set_backdrop adds a library backdrop to the stage and selects it by default.
+- set_sprite moves or restyles an existing sprite; omit fields to keep them.
+- Code attached to Stage is background code. The stage cannot move, turn, say,
+  change size or hide; use switch_backdrop (not switch_costume) there.
+- A change set applies top-down: put create_sprite before defs for that
+  sprite, and create_variable before using the variable.
+- touching, distance_to, goto_sprite, point_towards and attribute_of may
+  target mouse-pointer, edge, Stage (where valid), or the name of an existing
+  sprite. A sprite created in the same module must be created before the def
+  that targets it.
+- Colors are #rrggbb strings. touching_color detects whether the sprite is
+  touching that color; color_sees compares two colors; set_pen_color sets the
+  RGB pen color. Use these for pen levels and background/color detection.
+  The model cannot see the background image, so use known colors or ask the user.
+- Reuse costumes and backdrops the project already has when possible.
+- Lists are 1-based: list_item(1, "queue"). create the list first; keep monitors
+  hidden unless the request asks for them.
+{verified}
+Media library (relative to scratch/base/Media):
+{media}
+
+Available Scratch-Python API:
+{catalog}
+""".replace("{verified}", VERIFIED_PROP_PATHS)
+
+
+EXAMPLES_DSL = """
+Examples:
+
+User: Make the cat draw a square when I click the green flag.
+Python:
+```python
+summary("Added a green-flag square-drawing script.")
+
+@on_flag(target="Sprite1", label="draw_square")
+def draw_square():
+    pen_clear()
+    pen_down()
+    for _ in range(4):
+        move(100)
+        turn_right(90)
+    pen_up()
+```
+
+User: Add a bat that spins when I click the green flag.
+Python:
+```python
+summary("Added a spinning bat sprite.")
+create_sprite("Bat", costumes=["Animals/bat1-a.png"], direction=90, size=100, visible=True, rotation_style="all around")
+
+@on_flag(target="Bat", label="spin")
+def bat_spin():
+    while True:
+        turn_right(15)
+        wait(0.1)
+```
+
+User: Put stars in the background and switch to them when the green flag is clicked.
+Python:
+```python
+summary("Added a stars backdrop and a stage script.")
+set_backdrop("Space/stars.gif", select=True)
+
+@on_flag(target="Stage", label="stars_on_start")
+def stars_on_start():
+    switch_backdrop("stars")
+```
+"""
+
+
+
 def prompt_budget_chars() -> int:
     """The character budget for one prompt.
 
@@ -311,15 +449,18 @@ def media_index_text(library: Any = None, *, max_chars: int = 16000) -> str:
     return lib.prompt_index(max_chars=max_chars)
 
 
-def build_system_prompt(
+def _build_budgeted_prompt(
+    prompt_template: str,
+    examples: str,
     target: str | set[str] | frozenset[str] | None = None,
-    *args: Any,
+    *,
     budget_chars: int | None = None,
     categories: set[str] | None = None,
     media_index: str | None = None,
     context_doc: str | None = None,
+    catalog: str | None = None,
 ) -> str:
-    """Render the system prompt, compacting optional sections when over budget.
+    """The shared compaction ladder for every system-prompt variant.
 
     ``context_doc`` is the model context appendix (usually
     ``SCRATCH_AI_CONTEXT.md``). It is included verbatim when it fits; otherwise
@@ -328,18 +469,13 @@ def build_system_prompt(
     ``None`` (the default) keeps the prompt context-doc free for callers that
     do not want it.
 
-    ``target`` is the usual first argument. The old ``(categories, target)``
-    call shape is still accepted for compatibility.
+    ``catalog`` overrides the generated block catalog (the DSL builder passes
+    the Scratch-Python API reference instead).
     """
-    if isinstance(target, (set, frozenset)):
-        categories = set(target) if categories is None else categories
-        target = args[0] if args else None
-        args = ()
-    if args:
-        raise TypeError("build_system_prompt() takes at most one positional target")
     budget = _resolve_budget(budget_chars)
     kind = _target_kind(target)
-    catalog = catalog_summary(categories, kind)
+    if catalog is None:
+        catalog = catalog_summary(categories, kind)
     if media_index is None:
         media_index = media_index_text(max_chars=16000)
 
@@ -348,7 +484,7 @@ def build_system_prompt(
     doc_footer = "\n"
     doc_part = (doc_header + doc + doc_footer) if doc else ""
 
-    before, rest = SYSTEM_PROMPT.split("{media}")
+    before, rest = prompt_template.split("{media}")
     middle, after = rest.split("{catalog}")
 
     # The verified-paths block is optional detail. When the budget cannot hold
@@ -367,7 +503,7 @@ def build_system_prompt(
     ):
         before = unverified
 
-    full = before + media_index + middle + catalog + after + doc_part + "\n" + EXAMPLES
+    full = before + media_index + middle + catalog + after + doc_part + "\n" + examples
     if len(full) <= budget:
         return full
 
@@ -381,7 +517,7 @@ def build_system_prompt(
         + after
         + doc_part
         + "\n"
-        + EXAMPLES
+        + examples
     )
     if len(lean) <= budget:
         return lean
@@ -514,6 +650,65 @@ def build_system_prompt(
     )
 
 
+def build_system_prompt(
+    target: str | set[str] | frozenset[str] | None = None,
+    *args: Any,
+    budget_chars: int | None = None,
+    categories: set[str] | None = None,
+    media_index: str | None = None,
+    context_doc: str | None = None,
+) -> str:
+    """Render the JSON system prompt, compacting optional sections when over budget.
+
+    The output is unchanged by the DSL variant: this is the original template,
+    examples and budget ladder.
+
+    ``target`` is the usual first argument. The old ``(categories, target)``
+    call shape is still accepted for compatibility.
+    """
+    if isinstance(target, (set, frozenset)):
+        categories = set(target) if categories is None else categories
+        target = args[0] if args else None
+        args = ()
+    if args:
+        raise TypeError("build_system_prompt() takes at most one positional target")
+    return _build_budgeted_prompt(
+        SYSTEM_PROMPT,
+        EXAMPLES,
+        target,
+        budget_chars=budget_chars,
+        categories=categories,
+        media_index=media_index,
+        context_doc=context_doc,
+    )
+
+
+def build_dsl_system_prompt(
+    target: str | None = None,
+    *,
+    budget_chars: int | None = None,
+    context_doc: str | None = None,
+    media_index: str | None = None,
+) -> str:
+    """Render the Scratch-Python system prompt with the generated API reference.
+
+    ``api_reference`` is imported lazily so the JSON path never pays for the
+    dialect vocabulary table until ``generator = dsl`` asks for it.
+    """
+    from .dsl import api_reference
+
+    return _build_budgeted_prompt(
+        DSL_SYSTEM_PROMPT,
+        EXAMPLES_DSL,
+        target,
+        budget_chars=budget_chars,
+        categories=None,
+        media_index=media_index,
+        context_doc=context_doc,
+        catalog=api_reference(),
+    )
+
+
 def _script_owner(script: ScriptSummary) -> str:
     owner = "ai-owned" if script.owned else "user-created, read-only"
     if script.user_edited:
@@ -571,15 +766,29 @@ def _context_text(context: ProjectContext, level: int) -> str:
     return "\n".join(lines)
 
 
-def _user_prompt(request: str, context_text: str) -> str:
-    return f"""User request:
-{request}
+#: The closing instruction of the user prompt.  The json tail keeps the
+#: historical wording byte-for-byte; the dsl tail names the dialect so the
+#: last line the model reads cannot contradict the system prompt.
+JSON_REPLY_TAIL = "\n\nReturn the JSON change set now.\n"
+DSL_REPLY_TAIL = (
+    "\n\nReturn the Scratch-Python module now, "
+    "in one fenced python block.\n"
+)
 
-Project context:
-{context_text}
 
-Return the JSON change set now.
-"""
+def _reply_tail(generator: str) -> str:
+    return DSL_REPLY_TAIL if generator == "dsl" else JSON_REPLY_TAIL
+
+
+def _user_prompt(request: str, context_text: str, tail: str = JSON_REPLY_TAIL) -> str:
+    return (
+        f"User request:\n"
+        f"{request}\n"
+        f"\n"
+        f"Project context:\n"
+        f"{context_text}"
+        f"{tail}"
+    )
 
 
 def _essential_context_lines(compact: str) -> list[str]:
@@ -598,6 +807,7 @@ def _hard_user_fit(
     compact_context: str,
     budget: int,
     full_len: int,
+    tail: str = JSON_REPLY_TAIL,
 ) -> tuple[str, int]:
     """Trim context detail and the request, keeping the targeting surface.
 
@@ -606,7 +816,6 @@ def _hard_user_fit(
     """
     head = "User request:\n"
     context_head = "\n\nProject context:\n"
-    tail = "\n\nReturn the JSON change set now.\n"
     template = "[truncated {n} chars]"
     marker_reserve = len("\n" + template.format(n=9999999999))
 
@@ -663,28 +872,32 @@ def build_user_prompt_with_meta(
     context: ProjectContext,
     *,
     budget_chars: int | None = None,
+    generator: str = "json",
 ) -> tuple[str, dict[str, Any]]:
     """Build the user prompt and report which trimming stage was used.
 
     The audit bundle records the metadata so a turn that dropped project detail
-    can be distinguished from one that did not.
+    can be distinguished from one that did not.  ``generator`` only picks the
+    closing instruction: json keeps the historical wording, dsl names the
+    Scratch-Python module.
     """
     budget = _resolve_budget(budget_chars)
     request = "" if request is None else str(request)
+    tail = _reply_tail(generator)
 
     full_context = context.summary_text()
-    full_prompt = _user_prompt(request, full_context)
+    full_prompt = _user_prompt(request, full_context, tail)
     if len(full_prompt) <= budget:
         return full_prompt, _user_meta(0, full_prompt, budget, full_context)
 
     for level in (1, 2, 3):
         context_text = _context_text(context, level)
-        prompt = _user_prompt(request, context_text)
+        prompt = _user_prompt(request, context_text, tail)
         if len(prompt) <= budget:
             return prompt, _user_meta(level, prompt, budget, context_text)
 
     compact = _context_text(context, 3)
-    prompt, dropped = _hard_user_fit(request, compact, budget, len(full_prompt))
+    prompt, dropped = _hard_user_fit(request, compact, budget, len(full_prompt), tail)
     return prompt, _user_meta(
         3, prompt, budget, compact, truncated=True, dropped_chars=dropped
     )
@@ -695,6 +908,7 @@ def build_user_prompt(
     context: ProjectContext,
     *,
     budget_chars: int | None = None,
+    generator: str = "json",
 ) -> str:
     """Render the user prompt, trimming context detail before the request.
 
@@ -704,7 +918,7 @@ def build_user_prompt(
     targeting surface (target sprite and every script id/label/owner).
     """
     return build_user_prompt_with_meta(
-        request, context, budget_chars=budget_chars
+        request, context, budget_chars=budget_chars, generator=generator
     )[0]
 
 
