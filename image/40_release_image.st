@@ -166,19 +166,5 @@ replaces the dev-mode one in 22/37."
     ^ ''ok release '', aName' classified: 'release'.
 
 "Hide the developer-only UI reload button and menu item in release images."
-(Smalltalk at: #AIHarnessChatMorph) compile: 'ensureReloadButton
-    | button |
-    (Smalltalk at: #AIHarness) releaseMode ifTrue: [^ nil].
-    button := self valueOfProperty: #reloadButton.
-    button ifNotNil: [^ button].
-    button := ScratchFrameMorph
-        buttonLabel: ''Reload UI'' localized
-        selector: #reloadFromButton.
-    button target: self.
-    button width: 72; height: 18.
-    self addMorph: button.
-    self setProperty: #reloadButton toValue: button.
-    ^ button' classified: 'initialization'.
-
 (Smalltalk at: #AIHarness) logLine: 'release image support installed'.
 Transcript show: 'release image support installed'; cr.

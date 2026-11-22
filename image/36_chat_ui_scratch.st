@@ -376,6 +376,7 @@ sets a request flag; AIHarnessDevDispatcherMorph performs the reload on the UI
 thread so deleting the pane is safe.  See image/39_ui_reload.st."
 (Smalltalk at: #AIHarnessChatMorph) compile: 'ensureReloadButton
     | button |
+    (Smalltalk at: #AIHarness) releaseMode ifTrue: [^ nil].
     button := self valueOfProperty: #reloadButton.
     button ifNotNil: [^ button].
     button := ScratchFrameMorph

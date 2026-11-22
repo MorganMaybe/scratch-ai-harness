@@ -293,7 +293,8 @@ fall through to the full submorph draw so the rail is still last."
 	menu add: ''Project Notes'' action: #editNotes.
 	menu addLine.
 	menu add: ''AI Chat'' action: #toggleAIChat.
-	menu add: ''Reload UI'' action: #reloadChatUIFromMenu.
+	(Smalltalk at: #AIHarness) releaseMode ifFalse: [
+		menu add: ''Reload UI'' action: #reloadChatUIFromMenu].
 
 	Sensor shiftPressed ifTrue: [
 		menu addLine.
