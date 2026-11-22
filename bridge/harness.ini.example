@@ -1,0 +1,35 @@
+# Bridge model profiles. NO SECRETS HERE — this file names the environment
+# variable that holds the key, never the key itself.
+#
+# Copy to bridge/harness.ini to activate. Resolution order:
+#   built-in defaults < this file < DEEPSEEK_* environment < CLI arguments
+
+[model]
+default=opencode-go
+
+[profile:opencode-go]
+# The verified live path (oc_sk_ key).
+base_url=https://opencode.ai/inference/go/openai/v1
+model=deepseek-v4.1-flash
+api_key_env=DEEPSEEK_API_KEY
+timeout=90
+retries=2
+thinking=off
+
+[profile:deepseek-direct]
+# A direct DeepSeek platform key.
+base_url=https://api.deepseek.com
+model=deepseek-chat
+api_key_env=DEEPSEEK_API_KEY
+timeout=90
+retries=2
+thinking=off
+
+[profile:local]
+# Ollama or any other OpenAI-compatible server on this machine.
+base_url=http://127.0.0.1:11434/v1
+model=qwen2.5-coder
+api_key_env=LOCAL_API_KEY
+timeout=120
+retries=0
+thinking=off

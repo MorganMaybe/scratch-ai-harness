@@ -1,0 +1,55 @@
+# Secrets — never commit an API key
+bridge/.deepseek_key
+*.key
+.env
+.env.*
+!*.env.example
+
+# Local Scratch 1.4 runtime, images, media and projects
+# The release/dev bundle supplies these; the source repo stays small.
+scratch/base/*
+!scratch/base/.gitkeep
+scratch/base/audit/
+scratch/base/projects/
+scratch/base/Projects/
+scratch/base/probes/
+scratch/base/archive/
+scratch/base/Media.backup-*/
+scratch/base/*.txt
+scratch/base/*.cmd
+scratch/base/*.dmp
+scratch/base/*.ini
+scratch/base/*.image
+scratch/base/*.changes
+scratch/base/ScratchBuild.*
+scratch/base/ScratchReleaseBuild.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Local release output and archives
+release/
+*.zip
+
+# Generated logs and audits
+*.log
+scratch/base/audit/
+
+# Internal development history and generated media-classification work
+sessions/
+tools/media_groups_work/*
+!tools/media_groups_work/merge.py
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

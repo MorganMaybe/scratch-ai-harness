@@ -1,0 +1,18 @@
+# Copy to scratch\base\harness.ini (or let run_scratch.ps1 create it).
+# devMode=off restores the original interactive Scratch dialogs.
+autoOpen=off
+project=C:\path\to\project.sb
+autoSnapshot=off
+snapshotEvery=10
+errors=C:\path\to\scratch\base\dev_errors.log
+
+# Dev control server on 8767. The 2009 Squeak Socket API cannot bind only to
+# loopback, so this listener is visible on all interfaces and Windows Firewall
+# will prompt. The release image never starts it. Set off to run the dev image
+# without the control server (headless tools then need it turned back on).
+devMode=on
+controlServer=on
+
+# Bridge page Start button: auto (live when bridge\.deepseek_key exists, else
+# mock), live, or mock.
+bridgeLaunch=auto
