@@ -20,8 +20,8 @@ The previous detailed handoff (session 22) is preserved at
 | Undo, ownership, registry reconcile | Working |
 | Lazy context packs + sprite script detail | Working |
 | Python bridge, validator, compiler, providers | Working |
-| **Release image (full screen, no control server)** | **Verified** |
-| **Release bundle (stock media, no secrets)** | **Built, 50.5 MB** |
+| **Release image (windowed, no control server)** | **Verified** |
+| **Release bundle (stock media, no secrets)** | **Built, ~50.6 MB** |
 | Tests | **407 passed, 2 skipped** (fresh clone, media fixture) |
 | Live model path | `opencode-go` → `deepseek-v4.1-flash` |
 
@@ -29,7 +29,7 @@ The previous detailed handoff (session 22) is preserved at
 
 | Image | Role |
 |---|---|
-| `ScratchAIRelease.image` | **End-user release.** Full screen via Scratch's `fillScreenOn` (`TakeOverScreen` on). No 8767 control server, no dev watchdog, no Reload UI. Clean Cat project, chat rail, welcome line. |
+| `ScratchAIRelease.image` | **End-user release.** Normal window, `fillScreenOn` with `TakeOverScreen` off so the frame and rail fill the client area with no turquoise World border. No 8767 control server, no dev watchdog, no Reload UI; release-only **Quit** button. Clean Cat project, chat rail, welcome line. |
 | `ScratchAiTesting.image` | **Dev image.** Control server on 8767, dev dialog policy, Reload UI. Use `ai_control.py` and `scope` probes here. |
 | `ScratchDev.image` | Artifact of `tools\build_image.ps1`. |
 
@@ -44,7 +44,9 @@ places them there.
 - skips `startDevServer` and the watchdog;
 - forces `devMode` false;
 - closes Squeak `SystemWindow`s and `DialogBoxMorph`s;
-- calls `ScratchFrameMorph takeOverScreen: true` then `fillScreenOn`;
+- calls `ScratchFrameMorph takeOverScreen: false` then `fillScreenOn`, so the
+  frame fills the VM client area but the OS title bar stays (the Squeak Windows
+  VM ignores the title-bar close button, so the rail also gets a **Quit** button);
 - keeps the async dispatcher (chat Send needs it);
 - removes the Reload UI button;
 - `saveReleaseAs:` cleans the project, writes the release pair, and defers the

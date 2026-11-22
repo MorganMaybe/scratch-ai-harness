@@ -1,4 +1,4 @@
-"Release image support: end-user (fill-screen) mode with no dev tools.
+"Release image support: windowed end-user mode with no dev tools.
 
 A release image is a normal harness image plus a flag stored in the image:
     AIHarnessReleaseMode = true
@@ -7,8 +7,9 @@ On startup a release image:
   * does NOT start the 127.0.0.1:8767 control server or its watchdog,
   * does NOT auto-open a project or install the dev dialog policy,
   * closes non-Scratch (Squeak) windows,
-  * enters Scratch's native end-user fill-screen mode (noviceMode + error
-    catcher, no halos, sticky full-display frame),
+  * enters Scratch's native end-user fill-screen mode with TakeOverScreen off,
+    so the frame fills the normal window (noviceMode + error catcher, no halos,
+    sticky frame) and no turquoise World border is visible,
   * keeps the docked Chat / Bridge / Usage rail and the async dispatcher, so
     the Chat UI and the Bridge page still work.
 
@@ -77,7 +78,10 @@ replaces the dev-mode one in 22/37."
     frame := self findFrame.
     frame ifNil: [^ self].
     self closeDevWindows.
-    [ScratchFrameMorph takeOverScreen: true] ifError: [:e :r | nil].
+    "Windowed release: keep the OS title bar and close button. fillScreenOn
+    still makes the Scratch frame fill the VM client area, so no World colour
+    (turquoise) is visible around it."
+    [ScratchFrameMorph takeOverScreen: false] ifError: [:e :r | nil].
     [frame fillScreenOn] ifError: [:e :r |
         self logDevError: ''release'' text: e asString].
     World doOneCycleNow.

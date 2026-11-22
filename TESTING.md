@@ -45,20 +45,23 @@ without a network call.
 
 1. `.\tools\make_release_image.ps1 -Force` succeeds.
 2. `.\run_release.ps1` opens the image.
-3. The window covers the display (`1920×1080` here) and has no title bar.
+3. The window is `1400×900` (or the `-Width`/`-Height` you passed), has a normal
+   title bar, and the Scratch frame/rail fill the client area with no turquoise
+   World border.
 4. `Get-NetTCPConnection -LocalPort 8767` returns nothing (control server off).
 5. The rail shows **Chat / Bridge / Usage**, the Cat, one short welcome message,
-   and no **Reload UI** button.
+   a **Quit** button, and no **Reload UI** button.
 6. **File** menu has **AI Chat** but no **Reload UI**.
-7. **Bridge → Start** opens a `bridge_start.cmd` console and the page reaches
+7. **Quit** closes the app; **Alt+F4** and **File → Quit** also work.
+8. **Bridge → Start** opens a `bridge_start.cmd` console and the page reaches
    `bridge: ok`.
-8. Send `make the cat draw a spinning hexagon`; blocks appear in Scripts.
-9. Green flag runs the script; **Undo** removes it.
-10. Quit and relaunch: the project is clean again (Cat only), still full screen,
-    still no control server.
+9. Send `make the cat draw a spinning hexagon`; blocks appear in Scripts.
+10. Green flag runs the script; **Undo** removes it.
+11. Relaunch: the project is clean again (Cat only), still windowed, still no
+    control server.
 
 A reference screenshot is
-[`docs/media/release-fullscreen.png`](media/release-fullscreen.png).
+[`docs/media/release-windowed.png`](media/release-windowed.png).
 
 ## Test profiles
 

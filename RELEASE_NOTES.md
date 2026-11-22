@@ -2,8 +2,10 @@
 
 ## 0.1.0 — first public release
 
-- Full-screen **release image** with no 8767 control server, no dev watchdog
-  and no Reload UI. Clean Cat project, Chat / Bridge / Usage rail.
+- Windowed **release image** with no 8767 control server, no dev watchdog and
+  no Reload UI. The Scratch frame and rail fill the window client area with no
+  turquoise border; the normal title bar and a rail **Quit** button are
+  available. Clean Cat project, Chat / Bridge / Usage rail.
 - Portable image loader: `AIHarness load:` resolves `image/` relative to the
   running image, so the repo works from any folder.
 - `setup.ps1` asks for your own API key (masked) and writes only

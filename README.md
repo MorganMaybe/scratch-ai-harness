@@ -7,7 +7,7 @@ and iterate — without leaving Scratch.
 This is an unofficial mod of [Scratch 1.4](https://github.com/scratchfoundation/Scratch_1.4)
 (GPLv2). It is not affiliated with or endorsed by the Scratch Foundation.
 
-![Scratch AI Harness in full-screen release mode](docs/media/release-fullscreen.png)
+![Scratch AI Harness in windowed release mode](docs/media/release-windowed.png)
 
 ## What it does
 
@@ -35,16 +35,18 @@ The bundle contains:
 
 ```text
 Scratch.exe + plugins        the Scratch 1.4 Squeak VM
-ScratchAIRelease.image       clean, full-screen, no dev tools
+ScratchAIRelease.image       clean, windowed, no dev tools
 ScratchAiTesting.image       dev image with the 8767 control server
 Media / Help / locale        stock Scratch 1.4 assets
 bridge/                      local model bridge (Python)
 tools/                       control, audit, media and image helpers
 ```
 
-The release image is an **end-user** image: it starts at 1920×1080 (or the
-current display size), fills the screen, disables the local control server and
-the source-reload tools, and leaves only the Cat in a clean project.
+The release image is an **end-user** image: it opens in a normal 1400×900
+window (configurable in `run_release.ps1`), the Scratch frame and chat rail fill
+the window client area with no turquoise World border, and the local control
+server and source-reload tools are off. It leaves only the Cat in a clean
+project. Close it with the rail **Quit** button, **File → Quit**, or **Alt+F4**.
 
 ### 2. Add your own API key
 
@@ -119,7 +121,7 @@ cd scratch-ai-harness
 | Image | Purpose |
 |---|---|
 | `ScratchAiTesting.image` | dev image: control server on 8767, dev dialogs, reload UI |
-| `ScratchAIRelease.image` | end-user image: full screen, no control server, no dev menus |
+| `ScratchAIRelease.image` | end-user image: windowed, fills the window, rail Quit button, no control server |
 | `ScratchDev.image` | artifact from `tools\build_image.ps1` |
 
 Rebuild the clean dev image while it is running:
@@ -136,8 +138,9 @@ Rebuild the release image from a clean dev image:
 
 `image\40_release_image.st` implements release mode: a stored flag makes
 `AIHarness class>>startUp` skip the 8767 server and the dev watchdog, close
-Squeak tool windows, enter Scratch's native `fillScreenOn` end-user mode, and
-keep the chat rail plus the async dispatcher.
+Squeak tool windows, call `fillScreenOn` with `TakeOverScreen` **off** (so the
+frame fills the normal window, not the whole display), add a release-only
+**Quit** button to the rail, and keep the chat rail plus the async dispatcher.
 
 ### Build the image from source
 
@@ -211,7 +214,7 @@ tools/                   control client, audit, media index, image builders, .st
 docs/                    Squeak notes, UI map, history, release screenshot
 scratch/base/            local Scratch runtime (git-ignored)
 setup.ps1                one-time Python + API-key setup
-run_release.ps1          launch the full-screen release image
+run_release.ps1          launch and size the windowed release image
 run_live.ps1             launch the live bridge
 run_bridge.ps1           launch the deterministic mock bridge
 run_scratch.ps1          launch a dev image (control server)

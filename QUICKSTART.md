@@ -30,7 +30,10 @@ $env:DEEPSEEK_API_KEY = "..."
 .\run_release.ps1
 ```
 
-Scratch opens full screen with the chat rail on the right.
+Scratch opens in a normal 1400×900 window with the chat rail on the right. The
+Scratch UI fills the window; there is no turquoise border. Close it with the
+rail **Quit** button, **File → Quit**, or **Alt+F4**. Use
+`.\run_release.ps1 -Width 1600 -Height 1000` for a different size.
 
 ## 4. Start the bridge
 
@@ -80,6 +83,6 @@ The mock bridge returns deterministic scenes from `bridge\examples\`.
 | Bridge never says `ok` | Check the `bridge_start.cmd` console window; port 8765 may already be owned by another bridge. |
 | Chat says connection refused | Start the bridge from the **Bridge** tab, or run `.\run_live.ps1` in a terminal. |
 | Image opens without the rail | Use `ScratchAIRelease.image`; `run_release.ps1` selects it. |
-| Need to leave full screen | **File → Quit** to close, or Shift-click the rounded R for the developers menu. |
+| Need to close it | Click **Quit** in the rail header, use **File → Quit**, or press **Alt+F4**. The Windows title-bar X is unreliable in this Squeak VM. |
 
 More detail: [`README.md`](README.md), [`TESTING.md`](TESTING.md).

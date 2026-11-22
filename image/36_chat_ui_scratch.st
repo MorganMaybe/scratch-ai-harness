@@ -369,6 +369,7 @@ grows/shifts with the editor."
         toggleMode: false.
     self addMorph: collapseButton.
     self ensureReloadButton.
+    self ensureQuitButton.
     ^ self' classified: 'initialization'.
 
 "Dev helper: reload the UI source files and rebuild this pane.  The button only
@@ -405,6 +406,42 @@ thread so deleting the pane is safe.  See image/39_ui_reload.st."
     "Ask the dispatcher to reload 36/38/37 and rebuild the rail."
     Smalltalk at: #AIHarnessReloadUIRequested put: true.
     self status: ''Reloading UI...''.
+    ^ self' classified: 'actions'.
+
+"Release-only quit button. The Squeak Windows VM ignores the title-bar close
+button and Alt+F4 is disabled in Scratch.ini, so the release rail needs its own
+obvious way out."
+(Smalltalk at: #AIHarnessChatMorph) compile: 'ensureQuitButton
+    | button |
+    (Smalltalk at: #AIHarness) releaseMode ifFalse: [^ nil].
+    button := self valueOfProperty: #releaseQuitButton.
+    button ifNotNil: [^ button].
+    button := ScratchFrameMorph
+        buttonLabel: ''Quit'' localized
+        selector: #releaseQuit.
+    button target: self.
+    button width: 48; height: 18.
+    self addMorph: button.
+    self setProperty: #releaseQuitButton toValue: button.
+    ^ button' classified: 'initialization'.
+
+(Smalltalk at: #AIHarnessChatMorph) compile: 'layoutQuitButton
+    | button |
+    button := self ensureQuitButton.
+    button ifNil: [^ self].
+    collapseButton ifNotNil: [
+        button position:
+            (collapseButton left - 6 - button width) @
+                (collapseButton top - 3)].
+    collapseButton ifNil: [
+        button position:
+            (self right - 15 - button width) @ (self top + 23)].
+    ^ self' classified: 'layout'.
+
+(Smalltalk at: #AIHarnessChatMorph) compile: 'releaseQuit
+    | frame |
+    frame := (Smalltalk at: #AIHarness) findFrame.
+    frame ifNotNil: [frame quitScratch].
     ^ self' classified: 'actions'.
 
 (Smalltalk at: #AIHarnessChatMorph) compile: 'buildPages
@@ -521,6 +558,7 @@ tab pane in the normal submorph pass and draw it after the frame."
         collapseButton position:
             (self right - 15 - collapseButton width) @ (self top + 24)].
     self layoutReloadButton.
+    self layoutQuitButton.
     header := self valueOfProperty: #railHeader.
     header ifNotNil: [
         header position: self left @ self top.

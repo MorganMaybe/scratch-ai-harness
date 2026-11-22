@@ -93,9 +93,9 @@ if (Test-Path (Join-Path $root "tools\media_groups_work\merge.py")) {
 Copy-Tree -Source (Join-Path $root "docs") -Destination (Join-Path $stage "docs") `
     -ExcludeDirs @("media")
 New-Item -ItemType Directory -Force (Join-Path $stage "docs\media") | Out-Null
-$hero = Join-Path $root "docs\media\release-fullscreen.png"
+$hero = Join-Path $root "docs\media\release-windowed.png"
 if (Test-Path $hero) {
-    Copy-Item -LiteralPath $hero -Destination (Join-Path $stage "docs\media\release-fullscreen.png")
+    Copy-Item -LiteralPath $hero -Destination (Join-Path $stage "docs\media\release-windowed.png")
 }
 Copy-Tree -Source (Join-Path $root "scratch") -Destination (Join-Path $stage "scratch") `
     -ExcludeDirs @("base")
