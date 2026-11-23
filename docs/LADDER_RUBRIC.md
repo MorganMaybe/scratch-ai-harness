@@ -148,6 +148,13 @@ Honesty notes:
 | 6 | revision: the movement script is replaced by id (load_sprite first is ideal; a blind-but-correct replace is acceptable; a duplicate add_script is a fail) | bundle |
 | 7 | revision: jump is observably higher and run observably faster on stage, with the rest of the game intact | stage |
 
+The automated half of items 6-7 is `python tools\revision_fidelity.py
+<ladder-session-dir>`: it reports per run whether the revision loaded first,
+hit the bridge's replace echo, or went direct, and diffs the replaced
+scripts' ops against the originals (dropped `touching`/`next_costume`/`set_x`
+is the failure signature this rubric item exists to catch; a flagged
+`set_x(x+4)` -> `change_x(speed_var)` style rewrite is a pass, not a drop).
+
 ### calculator (the stress rung)
 
 | # | Item | Bundle level? |

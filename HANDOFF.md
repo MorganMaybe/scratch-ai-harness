@@ -136,6 +136,25 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   earlier in the module counts), skip cleanly without a context or an installed
   media tree, and leave the validator as defense in depth; the JSON path is
   untouched.
+- **Revision fidelity, diagnosed and fixed (2026-11-23, measured):** live
+  bundles showed dsl-mode revisions replacing scripts *blind* — the model
+  reconstructed them from labels and top-level block counts (loop bodies are
+  invisible to the count) and silently dropped behaviors: a "jump higher and
+  run faster" revision deleted platform landing (`touching`), animation
+  (`next_costume`) and bounds (`set_x`) while its notes claimed nothing was
+  lost. JSON-mode revisions never did this — their appendix teaches
+  load-first. Two layers landed: the dialect appendix and registry hint now
+  teach load-before-replace (json paths byte-identical), and the bridge
+  enforces it with a **replace echo** — a valid change set that
+  blind-replaces an AI-owned script whose tuples the bridge holds triggers
+  exactly one resend showing the current bodies plus the model's own
+  submission, asking for a merge-aware resubmission (not a repair, once per
+  turn, audited with a `replace_echo` marker). Re-measured with
+  `tools\ladder.py -Runs 3 -Scenarios platformer_chain`: dsl revisions went
+  from 3/3 blind with 5-6 dropped ops to 0/3 blind with 0 dropped ops (the
+  single flagged op was a `set_x(x_position()+4)` -> `change_x(run_speed)`
+  improvement), at ~2-3 extra attempts per revision. Score future runs with
+  `tools\revision_fidelity.py <ladder-session-dir>`.
 
 **Still weak — the honest part:** syntax reliability and token efficiency
 are solved; **output quality is not**. Semantic quality of larger scenes
@@ -341,6 +360,7 @@ with `tools\stop_bridge.ps1`. Profile and audit changes still come from
 | `DEEPSEEK_CONNECTION_SCOPE.md` | connection package |
 | `PY_DSL_SCOPE.md` | Python-subset front end: implemented (Phases A–B) with live-smoke findings; Phase C ladder pending |
 | `tools/ladder.py` + `docs/LADDER_RUBRIC.md` | Phase C benchmark: both generators, audit bundles, flip verdict, human rubric |
+| `tools/revision_fidelity.py` | revision scorer: dropped-op diffs + load/echo classification from ladder bundles |
 | `tools/render_pack_json.py` + `tools/pack_examples.py` | context packs: canonical dialect examples, generated JSON twins, per-pack SETUP, `--check` sync |
 | `tools/validate_packs.py` | offline validate/compile for the games, clones and scrolling examples |
 | `CHAT_UI_SCOPE.md` | docked rail |
