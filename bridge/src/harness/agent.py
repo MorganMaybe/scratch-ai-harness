@@ -153,6 +153,48 @@ def _change_outline(changes: list[Change | None]) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class _ReplaceEcho:
+    """One bridge-initiated resend for a blind ``replace_script``."""
+
+    prompt: str
+    sprites: list[str]
+
+
+def _replace_echo_targets(
+    changeset: ChangeSet,
+    context: ProjectContext,
+    registry: dict[str, ScriptSummary],
+    loaded_sprites: list[str],
+) -> dict[str, list[str]]:
+    """Map sprite name -> script ids replaced without a loaded body.
+
+    A script qualifies only when the bridge holds its exact current body (an
+    AI-owned script with native tuples) and its sprite was not loaded this
+    turn.  Replacing a body-less script, a user script or a script on a loaded
+    sprite stays a direct apply.
+    """
+    context_registry = context.registry()
+    loaded = {name.casefold() for name in loaded_sprites}
+    targets: dict[str, list[str]] = {}
+    for change in changeset.changes:
+        if change.action != "replace_script":
+            continue
+        script = context_registry.get(change.script_id) or registry.get(
+            change.script_id
+        )
+        if script is None or not script.owned or not script.tuples:
+            continue
+        if script.target.casefold() in loaded:
+            continue
+        if script.target not in context.sprites:
+            continue
+        ids = targets.setdefault(script.target, [])
+        if script.script_id not in ids:
+            ids.append(script.script_id)
+    return targets
+
+
 def _fragment_repair_prompt(
     request: str,
     context: ProjectContext,
@@ -353,6 +395,67 @@ class Agent:
             parts.append(f"# Loaded sprite detail: {canonical}\n" + body)
         return "\n\n".join(parts)
 
+    def _echo_detail(
+        self, targets: dict[str, list[str]], generator: str = "json"
+    ) -> str:
+        """Render only the scripts being replaced, in the mode's detail format.
+
+        The blocks use the same renderer as ``_loaded_sprite_detail``; the
+        sprite is filtered to the affected scripts so a large sprite does not
+        flood the echo.
+        """
+        parts: list[str] = []
+        for name, script_ids in targets.items():
+            sprite = self.context.sprites.get(name)
+            if sprite is None:
+                continue
+            scripts = [
+                script for script in sprite.scripts if script.script_id in script_ids
+            ]
+            if not scripts:
+                continue
+            only = replace(sprite, scripts=scripts)
+            if generator == "dsl":
+                from .dsl import render_sprite_detail
+
+                body = render_sprite_detail(only)
+            else:
+                body = sprite_detail_text(only)
+            parts.append(f"# Current body: {name}\n" + body)
+        return "\n\n".join(parts)
+
+    def _replace_echo(
+        self,
+        request: str,
+        changeset: ChangeSet,
+        loaded_sprites: list[str],
+        generator: str,
+        submission: str,
+    ) -> _ReplaceEcho | None:
+        """Build the one echo for a blind ``replace_script``.
+
+        Returns ``None`` when nothing qualifies: no ``replace_script``, no
+        known body, or the owning sprite was loaded this turn.
+        """
+        targets = _replace_echo_targets(
+            changeset, self.context, self.registry, loaded_sprites
+        )
+        if not targets:
+            return None
+        detail = self._echo_detail(targets, generator)
+        prompt = _replace_echo_prompt(
+            request,
+            self.context,
+            detail,
+            submission,
+            list(targets),
+            generator,
+        )
+        return _ReplaceEcho(
+            prompt=prompt,
+            sprites=list(targets),
+        )
+
     def _lint(self, changeset: ChangeSet) -> list[str]:
         """Advisory runtime lints; a lint bug must never fail the turn."""
         try:
@@ -445,9 +548,14 @@ class Agent:
         # Repairs are capped separately from model calls so a lazy context load
         # does not silently consume a repair attempt.
         repairs_used = 0
+        #: One replace echo per turn.  After it, a still-blind resubmission is
+        #: applied as-is so a model that ignores the bodies cannot loop.
+        echo_used = False
         attempt = 0
 
-        for attempt in range(1, self.max_repairs + 2 + _MAX_CONTEXT_LOADS):
+        for attempt in range(
+            1, self.max_repairs + 2 + _MAX_CONTEXT_LOADS + 1
+        ):
             # Before every model attempt (including the first one).
             _raise_if_cancelled(token)
             left = remaining_seconds(deadline)
@@ -708,6 +816,17 @@ class Agent:
                 except Exception as exc:
                     fragment_error = exc
                     last_issues = [ValidationIssue("json", str(exc))]
+                echo = (
+                    self._replace_echo(
+                        request,
+                        merged,
+                        loaded_sprites,
+                        generator,
+                        json.dumps(merged.to_dict(), indent=2),
+                    )
+                    if merged is not None and not last_issues and not echo_used
+                    else None
+                )
                 if self.audit is not None:
                     self.audit.write_attempt(
                         attempt,
@@ -717,9 +836,16 @@ class Agent:
                         issues=last_issues,
                         fragment=True,
                         fragment_indices=fragment_indices,
+                        replace_echo=echo is not None,
+                        echo_sprites=echo.sprites if echo is not None else None,
                     )
                 fragment_mode = False
                 if merged is not None and not last_issues:
+                    if echo is not None:
+                        echo_used = True
+                        _raise_if_cancelled(token)
+                        user = echo.prompt
+                        continue
                     compiled = compile_changeset(
                         merged, self.context, self.registry
                     )
@@ -759,6 +885,17 @@ class Agent:
                 last_issues = validate_changeset(
                     changeset, self.context, self.registry
                 )
+                echo = (
+                    self._replace_echo(
+                        request,
+                        changeset,
+                        loaded_sprites,
+                        generator,
+                        dsl_source or "",
+                    )
+                    if not last_issues and not echo_used
+                    else None
+                )
                 if self.audit is not None:
                     # Store the emitted change set as parsed.json, as the JSON
                     # path does, while raw.txt keeps the module source.
@@ -767,8 +904,15 @@ class Agent:
                         user_prompt=user,
                         reply=replace(reply, data=changeset.to_dict()),
                         issues=last_issues,
+                        replace_echo=echo is not None,
+                        echo_sprites=echo.sprites if echo is not None else None,
                     )
                 if not last_issues:
+                    if echo is not None:
+                        echo_used = True
+                        _raise_if_cancelled(token)
+                        user = echo.prompt
+                        continue
                     compiled = compile_changeset(
                         changeset, self.context, self.registry
                     )
@@ -838,14 +982,32 @@ class Agent:
                     last_issues = validate_changeset(
                         changeset, self.context, self.registry
                     )
+                    echo = (
+                        self._replace_echo(
+                            request,
+                            changeset,
+                            loaded_sprites,
+                            generator,
+                            json.dumps(reply.data, indent=2),
+                        )
+                        if not last_issues and not echo_used
+                        else None
+                    )
                     if self.audit is not None:
                         self.audit.write_attempt(
                             attempt,
                             user_prompt=user,
                             reply=reply,
                             issues=last_issues,
+                            replace_echo=echo is not None,
+                            echo_sprites=echo.sprites if echo is not None else None,
                         )
                     if not last_issues:
+                        if echo is not None:
+                            echo_used = True
+                            _raise_if_cancelled(token)
+                            user = echo.prompt
+                            continue
                         compiled = compile_changeset(
                             changeset, self.context, self.registry
                         )
@@ -1220,6 +1382,59 @@ to a JSON change set. Use only the dialect functions in the API reference.
 Control-channel replies stay JSON: when you need more context, return only
 {{"load_context": [...]}} or {{"load_sprite": [...]}} with a reason, never
 together with a module. Do not repeat the previous mistakes.
+"""
+
+
+def _replace_echo_prompt(
+    request: str,
+    context: ProjectContext,
+    detail: str,
+    submission: str,
+    sprites: list[str],
+    generator: str = "json",
+) -> str:
+    """The one bridge-initiated resend for a blind ``replace_script``.
+
+    A stateless resubmission needs both halves: the exact current bodies the
+    model never loaded, and the submission it just made.  The closing ask is
+    mode-aware: a fenced module in DSL mode, one JSON object otherwise.
+    """
+    names = ", ".join(sprites)
+    load_example = (
+        '{"load_sprite": ['
+        + ", ".join(json.dumps(name) for name in sprites)
+        + "]}"
+    )
+    if generator == "dsl":
+        fence = "python"
+        closing = """Resubmit the COMPLETE change set now as ONE fenced python block with
+full knowledge of the current bodies above. Keep the behaviours that still
+matter; extend or rename scripts rather than discarding them. If you
+deliberately drop a behaviour, say so in notes(...). Do not switch to a JSON
+change set."""
+    else:
+        fence = "json"
+        closing = """Resubmit the COMPLETE change set now as ONE JSON object with the same
+schema, with full knowledge of the current bodies above. Keep the behaviours
+that still matter; extend or rename scripts rather than discarding them. If you
+deliberately drop a behaviour, say so in notes."""
+    return f"""User request:
+{request}
+
+Project context:
+{context.summary_text(generator)}
+
+Current bodies of the script(s) you are about to replace:
+{detail}
+
+Your submission, about to be applied:
+```{fence}
+{submission}
+```
+
+{closing}
+This echo exists because the sprite's script detail was not loaded this turn;
+loading it first ({load_example}) gives the same information without the resend.
 """
 
 

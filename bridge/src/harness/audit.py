@@ -412,6 +412,8 @@ class TurnAudit:
         fragment: bool = False,
         fragment_indices: list[int] | None = None,
         dsl_errors: list[str] | None = None,
+        replace_echo: bool = False,
+        echo_sprites: list[str] | None = None,
     ) -> None:
         if not self.full:
             return
@@ -426,6 +428,13 @@ class TurnAudit:
             meta["fragment"] = True
             if fragment_indices is not None:
                 meta["fragment_indices"] = list(fragment_indices)
+        if replace_echo:
+            # The reply was a valid change set that replaced a script whose
+            # current body the model had not loaded; the bridge answered with
+            # one echo round showing those bodies.  ``echo_sprites`` names the
+            # sprites whose bodies were shown.
+            meta["replace_echo"] = True
+            meta["echo_sprites"] = list(echo_sprites or [])
         if user_prompt is not None:
             self._write(
                 f"prompts/user-{attempt:02d}.txt", user_prompt, full_only=True
