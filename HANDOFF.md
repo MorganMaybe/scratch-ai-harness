@@ -100,7 +100,17 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   predecessor built, so `load_sprite`/`replace_script` are exercised),
   `manifest.json`/`summary.json` with a mechanical `flip_verdict`, and a
   per-scenario human rubric. Offline wiring test included; the suite is
-  **562 passed, 2 skipped** (553 + 9 pack-dialect tests).
+  **586 passed, 2 skipped** (553 + 9 pack-dialect + 24 lint tests).
+- **Advisory runtime lints** (`harness/lints.py`): deterministic, no model
+  calls, warnings only. Flags a `forever`/`repeat_until` whose direct body
+  moves the sprite with no `wait` anywhere in its subtree (drift), an
+  unconditional `next_costume` at frame rate (flicker), and a newly created
+  zero-initial variable read but never written in the change set or in
+  AI-owned script tuples (never-written read). The canonical examples
+  (key-driven motion inside `if`, the waitless spinning bat, paddle `set_x`,
+  finite pen `repeat`, `switch_costume`) are deliberate exclusions. Warnings
+  ride the `#result` chat lines as `warning: ...` and land in `lints.json`
+  in full audit bundles; they never feed a repair.
 
 **Still weak — the honest part:** syntax reliability and token efficiency
 are solved; **output quality is not**. Semantic quality of larger scenes

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -24,6 +25,7 @@ from .context_doc import (
     load_context_doc,
     load_context_packs,
 )
+from .lints import lint_changeset
 from .llm import LLMClient
 from .prompts import (
     analyze_system_prompt,
@@ -297,6 +299,8 @@ class AgentResult:
     finish_reason: str | None = None
     reasoning_tokens: int | None = None
     cached_tokens: int | None = None
+    #: Advisory runtime lints.  They never block a turn or feed a repair.
+    lint_warnings: list[str] = field(default_factory=list)
 
 
 class Agent:
@@ -348,6 +352,16 @@ class Agent:
                 body = sprite_detail_text(sprite)
             parts.append(f"# Loaded sprite detail: {canonical}\n" + body)
         return "\n\n".join(parts)
+
+    def _lint(self, changeset: ChangeSet) -> list[str]:
+        """Advisory runtime lints; a lint bug must never fail the turn."""
+        try:
+            return lint_changeset(changeset, self.context, self.registry)
+        except Exception as exc:  # pragma: no cover - defensive
+            logging.getLogger("harness.lints").warning(
+                "event=lints.failed error=%s", type(exc).__name__
+            )
+            return []
 
     def _system_prompt(
         self,
@@ -709,9 +723,11 @@ class Agent:
                     compiled = compile_changeset(
                         merged, self.context, self.registry
                     )
+                    warnings = self._lint(merged)
                     if self.audit is not None:
                         self.audit.write_compiled(merged, compiled)
                         self.audit.write_chunks(merged, compiled)
+                        self.audit.write_lints(warnings)
                     return AgentResult(
                         request_id=request_id,
                         summary=compiled.summary,
@@ -725,6 +741,7 @@ class Agent:
                         finish_reason=reply.finish_reason,
                         reasoning_tokens=reply.reasoning_tokens,
                         cached_tokens=reply.cached_tokens,
+                        lint_warnings=warnings,
                     )
                 if merged is not None:
                     last_payload = merged.to_dict()
@@ -755,9 +772,11 @@ class Agent:
                     compiled = compile_changeset(
                         changeset, self.context, self.registry
                     )
+                    warnings = self._lint(changeset)
                     if self.audit is not None:
                         self.audit.write_compiled(changeset, compiled)
                         self.audit.write_chunks(changeset, compiled)
+                        self.audit.write_lints(warnings)
                     return AgentResult(
                         request_id=request_id,
                         summary=compiled.summary,
@@ -771,6 +790,7 @@ class Agent:
                         finish_reason=reply.finish_reason,
                         reasoning_tokens=reply.reasoning_tokens,
                         cached_tokens=reply.cached_tokens,
+                        lint_warnings=warnings,
                     )
             else:
                 last_payload = reply.data
@@ -829,9 +849,11 @@ class Agent:
                         compiled = compile_changeset(
                             changeset, self.context, self.registry
                         )
+                        warnings = self._lint(changeset)
                         if self.audit is not None:
                             self.audit.write_compiled(changeset, compiled)
                             self.audit.write_chunks(changeset, compiled)
+                            self.audit.write_lints(warnings)
                         return AgentResult(
                             request_id=request_id,
                             summary=compiled.summary,
@@ -845,6 +867,7 @@ class Agent:
                             finish_reason=reply.finish_reason,
                             reasoning_tokens=reply.reasoning_tokens,
                             cached_tokens=reply.cached_tokens,
+                            lint_warnings=warnings,
                         )
                     indices = _issue_change_indices(last_issues)
                     if (

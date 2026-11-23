@@ -594,6 +594,17 @@ class TurnAudit:
             self._warn("chunks/changes.json", exc)
 
     @_guard
+    def write_lints(self, lints: list[str]) -> None:
+        """Record this turn's advisory lint warnings as ``lints.json``."""
+        if not self.full:
+            return
+        self._write_json(
+            "lints.json",
+            [str(item) for item in (lints or [])],
+            full_only=True,
+        )
+
+    @_guard
     def finish(
         self,
         *,

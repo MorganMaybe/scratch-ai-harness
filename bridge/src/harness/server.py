@@ -472,6 +472,8 @@ class Bridge:
             attempts = result.attempts
             changes = len(result.compiled.changes)
             lines = result.compiled.chat_summary().splitlines()
+            for warning in result.lint_warnings:
+                lines.append(f"warning: {warning}")
             return [
                 [Sym("result"), request_id, lines, result.compiled.apply_structure(request_id)],
             ]
