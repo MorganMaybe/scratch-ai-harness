@@ -264,6 +264,9 @@ class _Transpiler:
         self.changes: list[Change] = []
         self.summary = "Updated the project."
         self.notes = ""
+        #: True once a module-level ``summary``/``notes`` call was seen, so a
+        #: metadata-only module is a legal acknowledgment instead of EMPTY.
+        self.saw_reply_metadata = False
         self.created_globals: set[str] = set()
         self.created_sprite_vars: dict[str, set[str]] = {}
         #: Costume/backdrop names this module already added, per target.
@@ -299,7 +302,7 @@ class _Transpiler:
                 self._module_stmt(node)
             except DSLError as exc:
                 self._add(exc)
-        if not self.changes and not self.errors:
+        if not self.changes and not self.errors and not self.saw_reply_metadata:
             self.errors.append(DSLError(EMPTY_MESSAGE))
         if self.errors:
             raise DSLErrors(self.errors)
@@ -367,6 +370,7 @@ class _Transpiler:
             )
         values, raw = self._bind_module(spec, call)
         if not spec.action:
+            self.saw_reply_metadata = True
             if name == "summary":
                 self.summary = values["text"]
             else:

@@ -171,6 +171,7 @@ Scripts (use the id for script_id/delete_script):
 
 Return **one** fenced `python` block and nothing else. No prose before or after
 it. The module inside the fence is the whole change set.
+If the request is already satisfied, return `summary(...)` with `notes(...)` and no defs — the bridge treats it as an acknowledgment and nothing is applied.
 
 **Control-channel replies stay JSON.** When you need more context, return only
 one of the small JSON objects from the preamble (not a python fence). Do not

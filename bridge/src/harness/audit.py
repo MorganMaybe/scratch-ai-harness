@@ -414,6 +414,8 @@ class TurnAudit:
         dsl_errors: list[str] | None = None,
         replace_echo: bool = False,
         echo_sprites: list[str] | None = None,
+        noop_guard: bool = False,
+        noop_sprites: list[str] | None = None,
     ) -> None:
         if not self.full:
             return
@@ -435,6 +437,12 @@ class TurnAudit:
             # sprites whose bodies were shown.
             meta["replace_echo"] = True
             meta["echo_sprites"] = list(echo_sprites or [])
+        if noop_guard:
+            # The reply was a valid change set that only replaced AI-owned
+            # scripts with byte-identical content; the bridge answered with one
+            # guard round naming the two legitimate ways forward.
+            meta["noop_guard"] = True
+            meta["noop_sprites"] = list(noop_sprites or [])
         if user_prompt is not None:
             self._write(
                 f"prompts/user-{attempt:02d}.txt", user_prompt, full_only=True

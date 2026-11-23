@@ -406,8 +406,8 @@ def validate_changeset(
     issues: list[ValidationIssue] = []
     working_context = copy.deepcopy(context)
     working_registry = dict(registry if registry is not None else context.registry())
-    if not changeset.changes:
-        issues.append(ValidationIssue("changes", "at least one change is required"))
+    # An empty change set is the acknowledgment reply shape: the request is
+    # already satisfied.  It validates cleanly and applies nothing.
     for index, change in enumerate(changeset.changes):
         path = f"changes[{index}]"
         if change.action == "add_script":

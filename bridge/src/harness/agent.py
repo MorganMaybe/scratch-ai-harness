@@ -42,6 +42,7 @@ from .providers.base import (
     remaining_seconds,
 )
 from .script_detail import (
+    decompile_script,
     resolve_sprite_name,
     sprite_detail_index,
     sprite_detail_text,
@@ -193,6 +194,129 @@ def _replace_echo_targets(
         if script.script_id not in ids:
             ids.append(script.script_id)
     return targets
+
+
+@dataclass(frozen=True)
+class _NoopGuard:
+    """One bridge-initiated resend for a replacement that changes nothing."""
+
+    prompt: str
+    sprites: list[str]
+
+
+#: Chat/lints wording for a no-op replace stripped from a mixed change set.
+_NOOP_REPLACE_WARNING = (
+    "script {label!r} ({target}): replacement identical to the current script"
+    " - nothing changed"
+)
+
+#: The two acknowledgment shapes the guard prompt names, per generator.
+_NOOP_GUARD_ACK_JSON = '{"summary": "...", "changes": [], "notes": "..."}'
+_NOOP_GUARD_ACK_DSL = (
+    'a module with only summary("...") and notes("...") calls and no defs'
+)
+
+
+def _contains_unknown_block(value: Any) -> bool:
+    """True when decompiled IR contains an op the bridge cannot verify."""
+    if isinstance(value, dict):
+        if value.get("op") == "unknown_block":
+            return True
+        return any(_contains_unknown_block(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_unknown_block(item) for item in value)
+    return False
+
+
+def _noop_replace_target(
+    change: Change,
+    context_registry: dict[str, ScriptSummary],
+    registry: dict[str, ScriptSummary],
+) -> tuple[str, str, str] | None:
+    """Return (script_id, target, label) when this replacement changes nothing.
+
+    Only a script whose exact current body the bridge holds can be compared:
+    an AI-owned script with native tuples.  Decompilation is lossy for exotic
+    ops, so any ``unknown_block`` (or a failed decompile) fails open: the
+    replacement is treated as a real change and the turn is left untouched.
+    A label rename is a real change too.
+    """
+    if change.action != "replace_script" or change.hat is None:
+        return None
+    script = context_registry.get(change.script_id) or registry.get(
+        change.script_id
+    )
+    if script is None or not script.owned or not script.tuples:
+        return None
+    try:
+        current = decompile_script(script.tuples)
+    except Exception:  # pragma: no cover - live tuples can be exotic
+        return None
+    if current is None or _contains_unknown_block(current):
+        return None
+    replacement = {
+        "hat": change.hat.to_dict(),
+        "body": [block.to_dict() for block in change.body],
+    }
+    if _contains_unknown_block(replacement):
+        return None
+    # ``change.target`` is filled from the registry by the validator, so an
+    # empty target means "the current sprite".  A real target move is a real
+    # change even when the blocks match.
+    if change.target and change.target != script.target:
+        return None
+    if (change.label or script.label) != script.label:
+        return None
+    if (
+        replacement["hat"] != current["hat"]
+        or replacement["body"] != current["body"]
+    ):
+        return None
+    return script.script_id, script.target, script.label
+
+
+def _noop_replace_script_ids(
+    changeset: ChangeSet,
+    context: ProjectContext,
+    registry: dict[str, ScriptSummary],
+) -> dict[str, tuple[str, str]]:
+    """Map script id -> (sprite, label) for replacements identical to current."""
+    context_registry = context.registry()
+    noops: dict[str, tuple[str, str]] = {}
+    for change in changeset.changes:
+        found = _noop_replace_target(change, context_registry, registry)
+        if found is not None:
+            script_id, target, label = found
+            noops[script_id] = (target, label)
+    return noops
+
+
+def _strip_noop_replaces(
+    changeset: ChangeSet,
+    context: ProjectContext,
+    registry: dict[str, ScriptSummary],
+) -> tuple[ChangeSet, list[str]]:
+    """Drop the no-op replacements and describe each one as a warning."""
+    context_registry = context.registry()
+    kept: list[Change] = []
+    warnings: list[str] = []
+    for change in changeset.changes:
+        found = _noop_replace_target(change, context_registry, registry)
+        if found is not None:
+            _script_id, target, label = found
+            warnings.append(
+                _NOOP_REPLACE_WARNING.format(label=label, target=target)
+            )
+            continue
+        kept.append(change)
+    return (
+        ChangeSet(
+            summary=changeset.summary,
+            changes=kept,
+            notes=changeset.notes,
+        ),
+        warnings,
+    )
 
 
 def _fragment_repair_prompt(
@@ -456,6 +580,46 @@ class Agent:
             sprites=list(targets),
         )
 
+    def _build_noop_guard(
+        self,
+        request: str,
+        noops: dict[str, tuple[str, str]],
+        generator: str,
+    ) -> _NoopGuard:
+        """Build the one guard prompt for an entirely no-op replacement set."""
+        targets: dict[str, list[str]] = {}
+        for script_id, (target, _label) in noops.items():
+            targets.setdefault(target, []).append(script_id)
+        detail = self._echo_detail(targets, generator)
+        prompt = _noop_guard_prompt(request, self.context, detail, generator)
+        return _NoopGuard(prompt=prompt, sprites=list(targets))
+
+    def _noop_action(
+        self,
+        request: str,
+        changeset: ChangeSet,
+        generator: str,
+        guard_used: bool,
+    ) -> tuple[_NoopGuard | None, ChangeSet, list[str]]:
+        """Apply the no-op replace guard to one valid change set.
+
+        A fully no-op set gets one guard round trip (when it has not fired
+        yet).  A mixed set is stripped, warned about, and applied without an
+        extra model call.  A fully no-op set after the guard is also stripped
+        so a model that ignores the guard cannot loop.
+        """
+        noops = _noop_replace_script_ids(changeset, self.context, self.registry)
+        if not noops:
+            return None, changeset, []
+        all_noop = len(noops) == len(changeset.changes)
+        if all_noop and not guard_used:
+            guard = self._build_noop_guard(request, noops, generator)
+            return guard, changeset, []
+        stripped, warnings = _strip_noop_replaces(
+            changeset, self.context, self.registry
+        )
+        return None, stripped, warnings
+
     def _lint(self, changeset: ChangeSet) -> list[str]:
         """Advisory runtime lints; a lint bug must never fail the turn."""
         try:
@@ -551,10 +715,14 @@ class Agent:
         #: One replace echo per turn.  After it, a still-blind resubmission is
         #: applied as-is so a model that ignores the bodies cannot loop.
         echo_used = False
+        #: One no-op replace guard per turn.  A replacement identical to the
+        #: current script normally gets one resend offering the two honest
+        #: outs; after it, identical replacements are stripped with warnings.
+        noop_guard_used = False
         attempt = 0
 
         for attempt in range(
-            1, self.max_repairs + 2 + _MAX_CONTEXT_LOADS + 1
+            1, self.max_repairs + 3 + _MAX_CONTEXT_LOADS + 1
         ):
             # Before every model attempt (including the first one).
             _raise_if_cancelled(token)
@@ -816,6 +984,13 @@ class Agent:
                 except Exception as exc:
                     fragment_error = exc
                     last_issues = [ValidationIssue("json", str(exc))]
+                guard, merged, noop_warnings = (
+                    self._noop_action(
+                        request, merged, generator, noop_guard_used
+                    )
+                    if merged is not None and not last_issues
+                    else (None, merged, [])
+                )
                 echo = (
                     self._replace_echo(
                         request,
@@ -824,7 +999,12 @@ class Agent:
                         generator,
                         json.dumps(merged.to_dict(), indent=2),
                     )
-                    if merged is not None and not last_issues and not echo_used
+                    if (
+                        merged is not None
+                        and not last_issues
+                        and not echo_used
+                        and guard is None
+                    )
                     else None
                 )
                 if self.audit is not None:
@@ -838,9 +1018,16 @@ class Agent:
                         fragment_indices=fragment_indices,
                         replace_echo=echo is not None,
                         echo_sprites=echo.sprites if echo is not None else None,
+                        noop_guard=guard is not None,
+                        noop_sprites=guard.sprites if guard is not None else None,
                     )
                 fragment_mode = False
                 if merged is not None and not last_issues:
+                    if guard is not None:
+                        noop_guard_used = True
+                        _raise_if_cancelled(token)
+                        user = guard.prompt
+                        continue
                     if echo is not None:
                         echo_used = True
                         _raise_if_cancelled(token)
@@ -849,7 +1036,7 @@ class Agent:
                     compiled = compile_changeset(
                         merged, self.context, self.registry
                     )
-                    warnings = self._lint(merged)
+                    warnings = self._lint(merged) + noop_warnings
                     if self.audit is not None:
                         self.audit.write_compiled(merged, compiled)
                         self.audit.write_chunks(merged, compiled)
@@ -885,6 +1072,13 @@ class Agent:
                 last_issues = validate_changeset(
                     changeset, self.context, self.registry
                 )
+                guard, changeset, noop_warnings = (
+                    self._noop_action(
+                        request, changeset, generator, noop_guard_used
+                    )
+                    if not last_issues
+                    else (None, changeset, [])
+                )
                 echo = (
                     self._replace_echo(
                         request,
@@ -893,7 +1087,7 @@ class Agent:
                         generator,
                         dsl_source or "",
                     )
-                    if not last_issues and not echo_used
+                    if not last_issues and not echo_used and guard is None
                     else None
                 )
                 if self.audit is not None:
@@ -906,8 +1100,15 @@ class Agent:
                         issues=last_issues,
                         replace_echo=echo is not None,
                         echo_sprites=echo.sprites if echo is not None else None,
+                        noop_guard=guard is not None,
+                        noop_sprites=guard.sprites if guard is not None else None,
                     )
                 if not last_issues:
+                    if guard is not None:
+                        noop_guard_used = True
+                        _raise_if_cancelled(token)
+                        user = guard.prompt
+                        continue
                     if echo is not None:
                         echo_used = True
                         _raise_if_cancelled(token)
@@ -916,7 +1117,7 @@ class Agent:
                     compiled = compile_changeset(
                         changeset, self.context, self.registry
                     )
-                    warnings = self._lint(changeset)
+                    warnings = self._lint(changeset) + noop_warnings
                     if self.audit is not None:
                         self.audit.write_compiled(changeset, compiled)
                         self.audit.write_chunks(changeset, compiled)
@@ -982,6 +1183,13 @@ class Agent:
                     last_issues = validate_changeset(
                         changeset, self.context, self.registry
                     )
+                    guard, changeset, noop_warnings = (
+                        self._noop_action(
+                            request, changeset, generator, noop_guard_used
+                        )
+                        if not last_issues
+                        else (None, changeset, [])
+                    )
                     echo = (
                         self._replace_echo(
                             request,
@@ -990,7 +1198,7 @@ class Agent:
                             generator,
                             json.dumps(reply.data, indent=2),
                         )
-                        if not last_issues and not echo_used
+                        if not last_issues and not echo_used and guard is None
                         else None
                     )
                     if self.audit is not None:
@@ -1001,8 +1209,15 @@ class Agent:
                             issues=last_issues,
                             replace_echo=echo is not None,
                             echo_sprites=echo.sprites if echo is not None else None,
+                            noop_guard=guard is not None,
+                            noop_sprites=guard.sprites if guard is not None else None,
                         )
                     if not last_issues:
+                        if guard is not None:
+                            noop_guard_used = True
+                            _raise_if_cancelled(token)
+                            user = guard.prompt
+                            continue
                         if echo is not None:
                             echo_used = True
                             _raise_if_cancelled(token)
@@ -1011,7 +1226,7 @@ class Agent:
                         compiled = compile_changeset(
                             changeset, self.context, self.registry
                         )
-                        warnings = self._lint(changeset)
+                        warnings = self._lint(changeset) + noop_warnings
                         if self.audit is not None:
                             self.audit.write_compiled(changeset, compiled)
                             self.audit.write_chunks(changeset, compiled)
@@ -1435,6 +1650,48 @@ Your submission, about to be applied:
 {closing}
 This echo exists because the sprite's script detail was not loaded this turn;
 loading it first ({load_example}) gives the same information without the resend.
+"""
+
+
+def _noop_guard_prompt(
+    request: str,
+    context: ProjectContext,
+    detail: str,
+    generator: str = "json",
+) -> str:
+    """The one bridge-initiated resend for a replacement that changes nothing.
+
+    The model gets two legitimate ways on: make a real change, or acknowledge
+    that the request is already satisfied.  The acknowledgment shape is the one
+    the bridge accepts for that generator (an empty change list, or a module
+    with only summary/notes calls).
+    """
+    acknowledgment = (
+        _NOOP_GUARD_ACK_DSL if generator == "dsl" else _NOOP_GUARD_ACK_JSON
+    )
+    return f"""User request:
+{request}
+
+Project context:
+{context.summary_text(generator)}
+
+Current bodies of the script(s) your replacement would rewrite identically:
+{detail}
+
+The replacement change set you just returned is identical to the current
+script(s) above: the hat, every block and the label all match, so applying it
+would change nothing in the project.
+
+Choose one:
+1. Make the change the request actually asks for: edit the blocks above (or add
+   a different script) so the project really differs, then return the complete
+   change set again.
+2. If the request is already satisfied by the current project, return the
+   acknowledgment reply and nothing else: {acknowledgment}. The bridge accepts
+   it and applies nothing.
+
+This guard exists because an identical replacement cannot change the project; it
+is checked once per turn before the change set is applied.
 """
 
 

@@ -476,10 +476,13 @@ def parse_changeset_partial(data: Any) -> ChangeSetParseResult:
             top_level_error=IRError("change set is missing a summary")
         )
     raw_changes = data.get("changes")
-    if not isinstance(raw_changes, list) or not raw_changes:
+    if not isinstance(raw_changes, list):
         return ChangeSetParseResult(
-            top_level_error=IRError("change set must contain at least one change")
+            top_level_error=IRError("change set 'changes' must be an array")
         )
+    # An empty ``changes`` list is a legitimate acknowledgment reply: the
+    # request is already satisfied, so nothing is applied (see the bridge's
+    # no-op replace guard).  The summary still reaches the chat.
     notes = data.get("notes", "")
     if not isinstance(notes, str):
         return ChangeSetParseResult(
