@@ -4,6 +4,7 @@ import os
 import re
 from typing import Any
 
+from . import known_media
 from .catalog import catalog_summary
 from .context import ProjectContext, ScriptSummary
 
@@ -26,6 +27,84 @@ VERIFIED_PROP_PATHS = """- Verified prop paths, also valid when the grouped inde
   Never use Players/fantasy1-a.png or other character art as pipes,
   platforms or geometry; it is a cartoon creature.
 """
+
+#: Optional known-good tier rendered next to ``VERIFIED_PROP_PATHS``. It is
+#: mined data (``known_media.json``), so it is absent until live turns exist.
+KNOWN_GOOD_HEADER = "Known-good assets (verified in live use):"
+KNOWN_GOOD_LIMIT = 24
+KNOWN_GOOD_MAX_CHARS = 1100
+KNOWN_GOOD_WIDTH = 100
+
+
+def _wrap_known(
+    prefix: str, items: list[str], width: int = KNOWN_GOOD_WIDTH
+) -> list[str]:
+    """One indented comma list, wrapped on ``", "`` boundaries."""
+    lines: list[str] = []
+    current = prefix
+    for item in items:
+        if current == prefix:
+            current += item
+        elif len(current) + 2 + len(item) > width:
+            lines.append(current + ",")
+            current = "    " + item
+        else:
+            current += ", " + item
+    lines.append(current)
+    return lines
+
+
+def _render_known(entries: list[tuple[str, str, int]]) -> str:
+    if not entries:
+        return ""
+    lines = [KNOWN_GOOD_HEADER]
+    for kind, title in (("costume", "costumes"), ("backdrop", "backdrops")):
+        items = [library for library, entry_kind, _ in entries if entry_kind == kind]
+        if items:
+            lines.extend(_wrap_known(f"  {title}: ", items))
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def _select_known(count: int) -> list[tuple[str, str, int]]:
+    """Top ``count`` entries overall, with a small floor for each media kind.
+
+    Backdrops are used far less often than costumes, so a strictly top-N list
+    would be all costumes and hide the kind the model gets wrong most
+    (``set_backdrop``). When a kind is absent, its top three entries replace
+    the lowest-ranked selections; the block stays within ``count`` entries.
+    """
+    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+        return []
+    entries = known_media.ranked_media(max(count, 64))
+    selected = entries[:count]
+    for kind in ("costume", "backdrop"):
+        if any(entry[1] == kind for entry in selected):
+            continue
+        extra = [entry for entry in entries if entry[1] == kind][:3]
+        if extra:
+            selected = selected[: max(0, count - len(extra))] + extra
+    return selected
+
+
+def known_good_media_block(
+    count: int = KNOWN_GOOD_LIMIT,
+    max_chars: int = KNOWN_GOOD_MAX_CHARS,
+) -> str:
+    """The compact known-good tier, or ``""`` when there is no mined data.
+
+    Paths are ranked by successful live use (the miner canonicalizes them
+    against the installed library), and the least-used entries are dropped if
+    the block would exceed ``max_chars``.
+    """
+    entries = _select_known(count)
+    block = _render_known(entries)
+    while entries and len(block) > max_chars:
+        entries = entries[:-1]
+        block = _render_known(entries)
+    return block
+
 
 SYSTEM_PROMPT = """You are the AI programming agent inside Scratch 1.4.
 
@@ -487,10 +566,14 @@ def _build_budgeted_prompt(
     before, rest = prompt_template.split("{media}")
     middle, after = rest.split("{catalog}")
 
-    # The verified-paths block is optional detail. When the budget cannot hold
-    # the instructions plus a readable catalog slice, drop it so the existing
-    # fallbacks run exactly as they did before the block existed.
-    unverified = before.replace(VERIFIED_PROP_PATHS, "")
+    # The verified-paths region is optional detail: the hand-curated prop paths
+    # plus the mined known-good tier, rendered as one unit so the tight-budget
+    # fallback can never keep half of it. With no mined data the text is
+    # byte-identical to the pre-ranking prompt.
+    verified_region = VERIFIED_PROP_PATHS + known_good_media_block()
+    if verified_region != VERIFIED_PROP_PATHS:
+        before = before.replace(VERIFIED_PROP_PATHS, verified_region)
+    unverified = before.replace(verified_region, "")
     marker_chars = len("\n[media index truncated 9999999999 chars]") + len(
         "\n[catalog truncated 9999999999 chars]"
     )

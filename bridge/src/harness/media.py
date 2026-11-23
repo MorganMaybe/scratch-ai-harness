@@ -119,6 +119,24 @@ def _unique_names(paths: list[str]) -> list[str]:
     return names
 
 
+def _known_first(suggestions: list[str]) -> list[str]:
+    """Stable-reorder near matches so known-good library paths lead.
+
+    The mined set is casefolded library paths; an entry that is not in it keeps
+    its original relative position, and the message format is unchanged.
+    """
+    if len(suggestions) < 2:
+        return suggestions
+    from .known_media import known_media_paths
+
+    known = known_media_paths()
+    if not known:
+        return suggestions
+    good = [item for item in suggestions if item.casefold() in known]
+    rest = [item for item in suggestions if item.casefold() not in known]
+    return good + rest
+
+
 class MediaError(ValueError):
     """An unresolvable or ambiguous media reference."""
 
@@ -386,7 +404,7 @@ class MediaLibrary:
                 if not close:
                     close = sorted(in_category, key=str.casefold)[:5]
                 suggestions = _dedupe(exact + close)[:5]
-                raise MediaError(f"unknown {kind} {query!r}", suggestions)
+                raise MediaError(f"unknown {kind} {query!r}", _known_first(suggestions))
             other_kind = BACKDROP if kind == COSTUME else COSTUME
             if any(
                 asset.category.casefold() == category.casefold()
@@ -397,11 +415,11 @@ class MediaLibrary:
                     f"{other_kind} category, not a {kind} category"
                 )
             if exact:
-                raise MediaError(f"unknown {kind} {query!r}", exact[:5])
+                raise MediaError(f"unknown {kind} {query!r}", _known_first(exact[:5]))
 
         pool = [asset.library for asset in assets] + [asset.name for asset in assets]
         suggestions = difflib.get_close_matches(text, pool, n=5, cutoff=0.55)
-        raise MediaError(f"unknown {kind} {query!r}", suggestions)
+        raise MediaError(f"unknown {kind} {query!r}", _known_first(suggestions))
 
     def prompt_index(self, kind: str | None = None, max_chars: int = 9000) -> str:
         """Compact grouped list of library names for the system prompt."""

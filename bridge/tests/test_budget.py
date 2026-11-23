@@ -10,9 +10,11 @@ from harness.prompts import (
     DEFAULT_PROMPT_BUDGET,
     EXAMPLES,
     SYSTEM_PROMPT,
+    VERIFIED_PROP_PATHS,
     build_system_prompt,
     build_user_prompt,
     estimate_tokens,
+    known_good_media_block,
     media_index_text,
     prompt_budget_chars,
 )
@@ -55,10 +57,13 @@ def _rich_context() -> ProjectContext:
 
 def _snapshot_system(target: str) -> str:
     kind = "stage" if target.lower() == "stage" else "sprite"
+    # The verified region is the curated prop paths plus the optional mined
+    # tier; the snapshot composes it exactly as the builder does.
+    region = VERIFIED_PROP_PATHS + known_good_media_block()
     return (
-        SYSTEM_PROMPT.replace("{catalog}", catalog_summary(None, kind)).replace(
-            "{media}", media_index_text(max_chars=16000)
-        )
+        SYSTEM_PROMPT.replace(VERIFIED_PROP_PATHS, region)
+        .replace("{catalog}", catalog_summary(None, kind))
+        .replace("{media}", media_index_text(max_chars=16000))
         + "\n"
         + EXAMPLES
     )

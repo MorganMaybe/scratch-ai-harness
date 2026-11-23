@@ -100,7 +100,8 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   predecessor built, so `load_sprite`/`replace_script` are exercised),
   `manifest.json`/`summary.json` with a mechanical `flip_verdict`, and a
   per-scenario human rubric. Offline wiring test included; the suite is
-  **617 passed, 2 skipped** (584 + 9 pack-dialect + 24 lint tests).
+  **626 passed, 2 skipped** (584 + 9 pack-dialect + 24 lint + 9 media
+  ranking tests).
 - **Advisory runtime lints** (`harness/lints.py`): deterministic, no model
   calls, warnings only. Flags a `forever`/`repeat_until` whose direct body
   moves the sprite with no `wait` anywhere in its subtree (drift), an
@@ -111,6 +112,18 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   finite pen `repeat`, `switch_costume`) are deliberate exclusions. Warnings
   ride the `#result` chat lines as `warning: ...` and land in `lints.json`
   in full audit bundles; they never feed a repair.
+- **Known-good media tier** (`tools\mine_media_usage.py`,
+  `harness\known_media.py`, seeded `known_media.json`): `ok` audit turns are
+  mined for the library references in their applied
+  `create_sprite`/`add_costume`/`set_backdrop` changes, canonicalized against
+  the installed media tree (so the pre-cleanup `Things/…`, `Fantasy/…` paths map
+  to today's `UI/…`, `Players/…`), and rendered as a compact block beside the
+  verified prop paths. `MediaLibrary.resolve`'s near matches list known-good
+  paths first. With no data both consumers are exactly as before. Seed: 66
+  paths, 147 uses, led by `Players/fantasy1-a.png` (20), `UI/button.gif` (8)
+  and `Sports/beachball1.png` (6). Regenerate after meaningful live sessions
+  with `python tools\mine_media_usage.py --dir scratch\base\audit` and commit
+  the result; `--check` fails in CI when the file is stale.
 - **Parse-time context and media gates** (`harness/dsl/parse.py`, 31 tests in
   `test_dsl_gates.py`): unknown script targets (`@on_flag(target="Ground")`),
   missing/unknown sprite targets on `create_variable`/`create_list` sprite

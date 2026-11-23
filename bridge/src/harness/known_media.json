@@ -1,0 +1,340 @@
+{
+  "schema": 1,
+  "generated": "2026-11-23T03:47:57Z",
+  "sources": [
+    "scratch/base/audit",
+    "../Scratch harness/scratch/base/audit"
+  ],
+  "paths": [
+    {
+      "library": "Players/fantasy1-a.png",
+      "kind": "costume",
+      "uses": 20
+    },
+    {
+      "library": "UI/button.gif",
+      "kind": "costume",
+      "uses": 8
+    },
+    {
+      "library": "Sports/beachball1.png",
+      "kind": "costume",
+      "uses": 6
+    },
+    {
+      "library": "Animals/cat1-a.png",
+      "kind": "costume",
+      "uses": 5
+    },
+    {
+      "library": "Animals/cat1-b.png",
+      "kind": "costume",
+      "uses": 5
+    },
+    {
+      "library": "Enemies/monster1-a.png",
+      "kind": "costume",
+      "uses": 4
+    },
+    {
+      "library": "Enemies/monster1-b.png",
+      "kind": "costume",
+      "uses": 4
+    },
+    {
+      "library": "People/boy1-standing.gif",
+      "kind": "costume",
+      "uses": 4
+    },
+    {
+      "library": "People/boy1-walking.gif",
+      "kind": "costume",
+      "uses": 4
+    },
+    {
+      "library": "Scenery/rock.png",
+      "kind": "costume",
+      "uses": 4
+    },
+    {
+      "library": "Animals/bat1-a.png",
+      "kind": "costume",
+      "uses": 3
+    },
+    {
+      "library": "Letters/Scratch/0.gif",
+      "kind": "costume",
+      "uses": 3
+    },
+    {
+      "library": "Sports/tennisball.png",
+      "kind": "costume",
+      "uses": 3
+    },
+    {
+      "library": "Animals/bat1-b.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Animals/dog1-a.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Animals/dog1-b.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Animals/duck1.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Animals/frog1.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Enemies/ghost1.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Geometry/line.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Instruments/drum1.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Instruments/drum2.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/1.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/2.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/3.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/4.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/5.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/6.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/7.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/8.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Letters/Scratch/9.gif",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Players/fantasy1-b.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Scenery/sun.png",
+      "kind": "costume",
+      "uses": 2
+    },
+    {
+      "library": "Space/stars.gif",
+      "kind": "backdrop",
+      "uses": 2
+    },
+    {
+      "library": "Animals/bird-flying.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Animals/crab1-a.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Animals/crab2.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Animals/dove1-a.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Animals/dove1-b.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Enemies/ghoul1-a.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Enemies/ghoul1-b.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Enemies/robot2.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "GameItems/key1.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "GameItems/lego.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/0.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/1.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/2.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/3.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/4.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/5.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/6.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/7.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/8.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Auto/9.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Scratch/c.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Scratch/e.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Scratch/m.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Letters/Scratch/p.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Nature/blue-sky.png",
+      "kind": "backdrop",
+      "uses": 1
+    },
+    {
+      "library": "Nature/woods.gif",
+      "kind": "backdrop",
+      "uses": 1
+    },
+    {
+      "library": "Players/gobo1.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Players/gobo2.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Players/robot1.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "Transport/car1.png",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "UI/buttonPressed.gif",
+      "kind": "costume",
+      "uses": 1
+    },
+    {
+      "library": "UI/scoreboard.gif",
+      "kind": "costume",
+      "uses": 1
+    }
+  ]
+}
