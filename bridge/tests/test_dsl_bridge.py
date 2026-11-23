@@ -309,8 +309,9 @@ def test_user_prompt_registry_hint_and_tail_follow_the_generator():
     )
     assert "Return the JSON change set now." in json_prompt
     assert (
-        "Scripts (replace one by putting its script_id on the event decorator;"
-        " delete_script(script_id) removes):" in dsl_prompt
+        "Scripts (replace_script rewrites the WHOLE script; load its sprite's"
+        " detail first when the current body matters; delete_script(script_id)"
+        " removes):" in dsl_prompt
     )
     assert (
         "Return the Scratch-Python module now, in one fenced python block."

@@ -7,6 +7,7 @@ from harness.changeset import compile_changeset
 from harness.context import ProjectContext
 from harness.block_ir import ChangeSet
 from harness.llm import MockLLM, draw_square_response
+from harness.prompts import _context_text
 from harness.protocol import ProtocolError, Sym, parse_literal
 from harness.server import Bridge
 from harness.smalltalk import to_literal
@@ -59,6 +60,29 @@ def test_context_summary_marks_read_only_scripts():
     assert "user-123" in text
     assert "read-only" in text
     assert "ai-1" in text
+
+
+DSL_SCRIPTS_HINT = (
+    "Scripts (replace_script rewrites the WHOLE script; load its sprite's "
+    "detail first when the current body matters; delete_script(script_id) "
+    "removes):"
+)
+JSON_SCRIPTS_HINT = "Scripts (use the id for replace_script/delete_script):"
+
+
+@pytest.mark.parametrize("level", [0, 1, 3])
+def test_dsl_registry_hint_warns_replacement_rewrites_the_whole_script(level):
+    text = _context_text(make_context(), level, generator="dsl")
+    assert DSL_SCRIPTS_HINT in text
+    assert DSL_SCRIPTS_HINT in text.splitlines()
+
+
+@pytest.mark.parametrize("level", [0, 1, 3])
+def test_json_registry_hint_is_unchanged(level):
+    text = _context_text(make_context(), level, generator="json")
+    assert JSON_SCRIPTS_HINT in text
+    assert "WHOLE script" not in text
+    assert "load its sprite" not in text
 
 
 def test_context_rejects_malformed_entries():

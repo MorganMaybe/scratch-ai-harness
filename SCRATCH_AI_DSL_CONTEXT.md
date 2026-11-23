@@ -53,11 +53,20 @@ def bat_chase():
 ```
 
 Keep the `script_id` to replace an AI-owned script
-(`@on_flag(target="Bat", label="chase", script_id="ai-1")`). If no index is
+(`@on_flag(target="Bat", label="chase", script_id="ai-1")`). Replacing rewrites
+the **whole** script: the def you return is the entire new body, never a patch.
+Never reconstruct it from the label and the block count - the count is
+top-level only, so a `forever` loop's body is invisible. Load the sprite's
+detail first when the current body matters, then keep the behaviors that still
+matter and say in `notes` what you deliberately drop. If no index is
 shown, exact bodies are unavailable: revise from ids, labels, hats and counts.
 User scripts are read-only and their bodies are omitted. `load_sprite` and
 `load_context` may be combined, never with a module, and the turn is limited to
 two lazy-context loads.
+
+Before replacing an AI-owned script whose current body matters, return
+`{"load_sprite": ["Name"], "reason": ...}` first; the bridge resends the
+request with that sprite's exact bodies.
 
 ---
 
@@ -120,7 +129,10 @@ one with `create_list`, then use the list functions.
   scripts** have ids like `user-123456` and are read-only; add a new script
   alongside them.
 - To replace an AI-owned script, put `script_id="ai-4"` on that def's event
-  decorator. Without `script_id`, the def adds a new script.
+  decorator. Without `script_id`, the def adds a new script. Replacement
+  rewrites the whole body: load the sprite's detail first when the current body
+  matters (the block count is top-level only, so loop bodies are invisible),
+  keep the behaviors that still matter, and note what you drop.
 - A script flagged `edited outside the harness` was changed manually. Leave it
   alone or ask the user; do not silently replace it.
 - Labels are human names. Keep them short, unique and descriptive (`wander`,
@@ -733,6 +745,8 @@ Before returning the module, check:
       defs that use them.
 - [ ] Every new def is an add, or carries `script_id` to replace; never a
       duplicate hat for the same purpose.
+- [ ] Replacing a script whose current body matters has loaded that sprite this
+      turn, or the body is intentionally discarded and `notes` say so.
 - [ ] Stage defs use no motion, say/think, size, show/hide, or sprite-only
       sensing.
 - [ ] Every variable is created or known from the context, and no script reads
