@@ -370,7 +370,7 @@ class Agent:
             core = load_context_doc(DEFAULT_DSL_CONTEXT_DOC) or load_context_doc()
         else:
             core = load_context_doc()
-        extra = load_context_packs(packs)
+        extra = load_context_packs(packs, generator)
         detail = self._loaded_sprite_detail(sprites or [], generator)
         loaded = "\n\n".join(part for part in (extra, detail) if part)
         index = sprite_detail_index(self.context)

@@ -40,9 +40,10 @@ Shipped on branch `pydsl`, all offline-tested:
   landed; the earlier add-not-replace pattern has not recurred.
 - **Open finding (Phase C):** reliability and efficiency are solved;
   **output quality is not measured**. Semantic quality of larger scenes,
-  revision discipline across more cases, and the context packs (still
-  teaching in JSON) are the active front. Run the ladder: same prompts in
-  both modes with `-Audit full`, scored with
+  revision discipline across more cases, and the context packs (now
+  dialect-first with generated JSON twins; pack-driven quality unmeasured) are
+  the active front. Run the ladder: same prompts in both modes with
+  `-Audit full`, scored with
   `tools/audit.py score --group generator`, plus a human look at the
   resulting projects; the default flip to `dsl` waits on it.
 - **Runtime prerequisites learned live:** a worktree bridge needs
@@ -353,6 +354,12 @@ square → bigger+say → three-crab beach scene → clicker with score →
 platformer (with `games`/`clones` pack loads) → a revision flow
 (`load_sprite` then `replace_script`) → the historical calculator request that
 failed 3× with `bad_json`.
+
+**The ladder is implemented** as `tools/ladder.py` (both generators
+interleaved per run, chained revision turns, one full audit bundle per
+turn, `manifest.json`/`summary.json`, a mechanical `flip_verdict`, and a
+`--dry-run` wiring mode), with `docs/LADDER_RUBRIC.md` as the human half.
+Run it and fill the rubric's results log; the flip decision quotes both.
 
 **Success criteria to flip the default:** no `bad_json` class at all; repair
 rounds per successful turn ≤ today's; applied-rate on the ladder ≥ JSON mode;

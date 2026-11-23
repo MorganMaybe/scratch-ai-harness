@@ -15,6 +15,10 @@ asks for the change set again. Each pack extends the prompt budget by its own
 size, so it does not displace the core guide. Requests for unknown names are
 repaired; packs are never loaded twice in one turn.
 
+Examples are written in the Scratch-Python dialect (`generator = dsl`); each
+one has a generated JSON twin for `generator = json`, so the bridge shows the
+model only the dialect it is expected to write.
+
 | Pack | Use when |
 |---|---|
 | `clones.md` | spawning bullets, particles, enemies, tiles, trails; clone lifecycle and touching |

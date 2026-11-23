@@ -23,29 +23,113 @@ Global variables: `cam_x`, `player_x`.
 
 Player sprite:
 
+```python
+@on_flag(target="Player", label="move_and_camera")
+def move_and_camera():
+    player_x = 0
+    cam_x = 0
+    while True:
+        if key_pressed("right arrow"):
+            player_x += 5
+        if key_pressed("left arrow"):
+            player_x -= 5
+        cam_x = player_x
+        set_x(0)
+        set_y(-40)
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 {
   "action": "add_script",
   "target": "Player",
   "label": "move_and_camera",
-  "hat": { "op": "when_flag_clicked" },
+  "hat": {
+    "op": "when_flag_clicked"
+  },
   "body": [
-    { "op": "set_var", "args": { "name": "player_x", "value": 0 } },
-    { "op": "set_var", "args": { "name": "cam_x", "value": 0 } },
-    { "op": "forever", "body": [
-      { "op": "if", "args": { "condition": {
-        "op": "key_pressed", "args": { "key": "right arrow" } } }, "body": [
-        { "op": "change_var", "args": { "name": "player_x", "delta": 5 } }
-      ] },
-      { "op": "if", "args": { "condition": {
-        "op": "key_pressed", "args": { "key": "left arrow" } } }, "body": [
-        { "op": "change_var", "args": { "name": "player_x", "delta": -5 } }
-      ] },
-      { "op": "set_var", "args": { "name": "cam_x", "value": {
-        "op": "get_var", "args": { "name": "player_x" } } } },
-      { "op": "set_x", "args": { "x": 0 } },
-      { "op": "set_y", "args": { "y": -40 } }
-    ] }
+    {
+      "op": "set_var",
+      "args": {
+        "name": "player_x",
+        "value": 0
+      }
+    },
+    {
+      "op": "set_var",
+      "args": {
+        "name": "cam_x",
+        "value": 0
+      }
+    },
+    {
+      "op": "forever",
+      "body": [
+        {
+          "op": "if",
+          "args": {
+            "condition": {
+              "op": "key_pressed",
+              "args": {
+                "key": "right arrow"
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "change_var",
+              "args": {
+                "name": "player_x",
+                "delta": 5
+              }
+            }
+          ]
+        },
+        {
+          "op": "if",
+          "args": {
+            "condition": {
+              "op": "key_pressed",
+              "args": {
+                "key": "left arrow"
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "change_var",
+              "args": {
+                "name": "player_x",
+                "delta": -5
+              }
+            }
+          ]
+        },
+        {
+          "op": "set_var",
+          "args": {
+            "name": "cam_x",
+            "value": {
+              "op": "get_var",
+              "args": {
+                "name": "player_x"
+              }
+            }
+          }
+        },
+        {
+          "op": "set_x",
+          "args": {
+            "x": 0
+          }
+        },
+        {
+          "op": "set_y",
+          "args": {
+            "y": -40
+          }
+        }
+      ]
+    }
   ]
 }
 ```
@@ -56,40 +140,124 @@ world moves under the player.
 ## Scrolling tiles with clones
 
 Tile sprite local variable: `tile_x` (create it first with
-`create_variable`, `scope: "sprite"`). Global: `cam_x`, `spawn_index`.
+`create_variable(..., scope="sprite")`). Global: `cam_x`, `spawn_index`.
 
+```python
+@on_flag(target="Tile", label="build_tiles")
+def build_tiles():
+    spawn_index = 0
+    for _ in range(24):
+        create_clone("myself")
+        spawn_index += 1
+
+
+@on_clone_start(target="Tile", label="tile_follow")
+def tile_follow():
+    tile_x = spawn_index * 40
+    set_y(-150)
+    while True:
+        set_x(tile_x - cam_x)
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 [
   {
     "action": "add_script",
     "target": "Tile",
     "label": "build_tiles",
-    "hat": { "op": "when_flag_clicked" },
+    "hat": {
+      "op": "when_flag_clicked"
+    },
     "body": [
-      { "op": "set_var", "args": { "name": "spawn_index", "value": 0 } },
-      { "op": "repeat", "args": { "count": 24 }, "body": [
-        { "op": "create_clone", "args": { "target": "myself" } },
-        { "op": "change_var", "args": { "name": "spawn_index", "delta": 1 } }
-      ] }
+      {
+        "op": "set_var",
+        "args": {
+          "name": "spawn_index",
+          "value": 0
+        }
+      },
+      {
+        "op": "repeat",
+        "args": {
+          "count": 24
+        },
+        "body": [
+          {
+            "op": "create_clone",
+            "args": {
+              "target": "myself"
+            }
+          },
+          {
+            "op": "change_var",
+            "args": {
+              "name": "spawn_index",
+              "delta": 1
+            }
+          }
+        ]
+      }
     ]
   },
   {
     "action": "add_script",
     "target": "Tile",
     "label": "tile_follow",
-    "hat": { "op": "when_clone_start" },
+    "hat": {
+      "op": "when_clone_start"
+    },
     "body": [
-      { "op": "set_var", "args": { "name": "tile_x", "value": {
-        "op": "*", "args": { "a": {
-          "op": "get_var", "args": { "name": "spawn_index" } },
-          "b": 40 } } } },
-      { "op": "set_y", "args": { "y": -150 } },
-      { "op": "forever", "body": [
-        { "op": "set_x", "args": { "x": {
-          "op": "-", "args": { "a": {
-            "op": "get_var", "args": { "name": "tile_x" } },
-            "b": { "op": "get_var", "args": { "name": "cam_x" } } } } } }
-      ] }
+      {
+        "op": "set_var",
+        "args": {
+          "name": "tile_x",
+          "value": {
+            "op": "multiply",
+            "args": {
+              "a": {
+                "op": "get_var",
+                "args": {
+                  "name": "spawn_index"
+                }
+              },
+              "b": 40
+            }
+          }
+        }
+      },
+      {
+        "op": "set_y",
+        "args": {
+          "y": -150
+        }
+      },
+      {
+        "op": "forever",
+        "body": [
+          {
+            "op": "set_x",
+            "args": {
+              "x": {
+                "op": "subtract",
+                "args": {
+                  "a": {
+                    "op": "get_var",
+                    "args": {
+                      "name": "tile_x"
+                    }
+                  },
+                  "b": {
+                    "op": "get_var",
+                    "args": {
+                      "name": "cam_x"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
     ]
   }
 ]
@@ -108,16 +276,88 @@ tile exists, use a simple broad costume and note the approximation.
 ## Tile maps from a list
 
 Instead of one clone per column, use a global list `map` containing `0`/`1` per
-tile. In the parent loop, test `list_item` and only clone where the value is 1:
+tile. The parent loop walks the list, tests `list_item`, and only clones where
+the value is 1:
 
+```python
+@on_flag(target="Tile", label="build_from_map")
+def build_from_map():
+    spawn_index = 1
+    for _ in range(list_length("map")):
+        if list_item(spawn_index, "map") == 1:
+            create_clone("myself")
+        spawn_index += 1
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
-{ "op": "if", "args": { "condition": {
-  "op": "=", "args": { "a": {
-    "op": "list_item", "args": { "index": {
-      "op": "get_var", "args": { "name": "spawn_index" } },
-      "list": "map" } }, "b": 1 } } }, "body": [
-  { "op": "create_clone", "args": { "target": "myself" } }
-] }
+{
+  "action": "add_script",
+  "target": "Tile",
+  "label": "build_from_map",
+  "hat": {
+    "op": "when_flag_clicked"
+  },
+  "body": [
+    {
+      "op": "set_var",
+      "args": {
+        "name": "spawn_index",
+        "value": 1
+      }
+    },
+    {
+      "op": "repeat",
+      "args": {
+        "count": {
+          "op": "list_length",
+          "args": {
+            "list": "map"
+          }
+        }
+      },
+      "body": [
+        {
+          "op": "if",
+          "args": {
+            "condition": {
+              "op": "equals",
+              "args": {
+                "a": {
+                  "op": "list_item",
+                  "args": {
+                    "index": {
+                      "op": "get_var",
+                      "args": {
+                        "name": "spawn_index"
+                      }
+                    },
+                    "list": "map"
+                  }
+                },
+                "b": 1
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "create_clone",
+              "args": {
+                "target": "myself"
+              }
+            }
+          ]
+        },
+        {
+          "op": "change_var",
+          "args": {
+            "name": "spawn_index",
+            "delta": 1
+          }
+        }
+      ]
+    }
+  ]
+}
 ```
 
 Use `list_length` for the loop count. Keep lists to a few hundred entries.

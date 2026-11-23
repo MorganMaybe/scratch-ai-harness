@@ -41,6 +41,8 @@ def _ensure_media_library(tmp_path_factory: pytest.TempPathFactory) -> None:
         "Animals/bat1-b.png",
         "Animals/bat2-a.png",
         "Animals/bat2-b.png",
+        "Animals/dove1-a.png",
+        "Animals/dove1-b.png",
         "Scenery/rock.png",
         "Geometry/line.png",
         "Geometry/arrow1-a.png",

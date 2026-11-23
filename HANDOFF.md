@@ -21,7 +21,7 @@ alone on purpose.
 | Undo, ownership, registry reconcile | Working |
 | Lazy context packs and sprite script detail | Working |
 | Python bridge, validator, compiler, providers | Working |
-| **Scratch-Python front end (`generator = dsl`)** | **Built on branch `pydsl`, live-verified end-to-end (bridge + image).** Output-quality iteration and the Phase C ladder pending; JSON stays the default. See §1a below, `PY_DSL_SCOPE.md`, `SCRATCH_AI_DSL_CONTEXT.md`. |
+| **Scratch-Python front end (`generator = dsl`)** | **Built on branch `pydsl`, live-verified end-to-end (bridge + image).** Output-quality iteration pending; the Phase C ladder tooling is built (`tools/ladder.py` + `docs/LADDER_RUBRIC.md`), the live measurement is not done yet; JSON stays the default. See §1a below, `PY_DSL_SCOPE.md`, `SCRATCH_AI_DSL_CONTEXT.md`. |
 | **Release image (windowed, no control server)** | **Verified** |
 | **Release bundle (stock media, no secrets)** | **Built, about 50.6 MB** |
 | Tests | **407 passed, 2 skipped** on a fresh clone (media fixture) |
@@ -94,17 +94,27 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   with frequent `bad_json` retries. The platformer and triangle turns
   applied and are visible in the image; the revision flow used `script_id`
   replacement correctly once the mode-aware registry hint landed.
+- **Phase C ladder tooling** (`tools\ladder.py` +
+  `docs\LADDER_RUBRIC.md`): the same prompts through both generators with
+  full audit bundles, scenario chaining (a revision turn sees the state its
+  predecessor built, so `load_sprite`/`replace_script` are exercised),
+  `manifest.json`/`summary.json` with a mechanical `flip_verdict`, and a
+  per-scenario human rubric. Offline wiring test included; the suite is
+  **562 passed, 2 skipped** (553 + 9 pack-dialect tests).
 
 **Still weak — the honest part:** syntax reliability and token efficiency
 are solved; **output quality is not**. Semantic quality of larger scenes
 (the platformer runs but has not been critiqued), revision discipline
 beyond the two observed cases, and the context packs (`games`, `clones`,
-`scrolling`, `pen-3d`) still teaching in JSON examples. None of that is
-measured yet. **The next task on this branch is the Phase C ladder:**
-same prompts in both modes with `-Audit full`, scored via
-`tools/audit.py score --group generator` (applied-rate, repair rounds,
-tokens, and a human look at the resulting projects). The default flip to
-`dsl` waits on that measurement.
+`scrolling`, `pen-3d`) are the open front. The three packs with change-set
+examples are now dialect-first, with JSON twins generated from the dialect,
+and the bridge filters them per generator; how much that improves pack-driven
+turns is unmeasured. **The next task on this branch is running the Phase C
+ladder** (`python tools\ladder.py -Runs 3`, then `tools/audit.py score
+--dir <stamp-dir> --group generator`) and scoring `docs\LADDER_RUBRIC.md`
+against the bundles plus one live image pass per mode (applied-rate,
+repair rounds, tokens, and a human look at the resulting projects). The
+default flip to `dsl` waits on that measurement.
 
 **Runtime notes from the 2026-11-23 live session (learned the hard way):**
 
@@ -295,6 +305,9 @@ with `tools\stop_bridge.ps1`. Profile and audit changes still come from
 | `SPRITE_STAGE_SCOPE.md` | sprite and stage, as built |
 | `DEEPSEEK_CONNECTION_SCOPE.md` | connection package |
 | `PY_DSL_SCOPE.md` | Python-subset front end: implemented (Phases A–B) with live-smoke findings; Phase C ladder pending |
+| `tools/ladder.py` + `docs/LADDER_RUBRIC.md` | Phase C benchmark: both generators, audit bundles, flip verdict, human rubric |
+| `tools/render_pack_json.py` + `tools/pack_examples.py` | context packs: canonical dialect examples, generated JSON twins, per-pack SETUP, `--check` sync |
+| `tools/validate_packs.py` | offline validate/compile for the games, clones and scrolling examples |
 | `CHAT_UI_SCOPE.md` | docked rail |
 | `SCRATCH_2_FEATURE_AUDIT.md` | clones and BYOB audit |
 | `docs/SQUEAK_NOTES.md` | the Squeak and Scratch traps |

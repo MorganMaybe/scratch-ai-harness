@@ -15,6 +15,40 @@ DEFAULT_CONTEXT_DIR = Path(__file__).resolve().parents[3] / "context"
 
 _PACK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 
+#: Marker comment ``tools/render_pack_json.py`` writes between a canonical
+#: dialect example and its generated JSON twin.
+_TWIN_MARKER = (
+    "generated from the python example above by tools/render_pack_json.py; "
+    "edit the python, not this"
+)
+_TWIN_MARKER_RE = re.compile(
+    r"^<!-- " + re.escape(_TWIN_MARKER) + r" -->\n?", re.MULTILINE
+)
+_TWIN_PAIR_RE = re.compile(
+    r"\n?<!-- " + re.escape(_TWIN_MARKER) + r" -->\n?```json\n.*?```",
+    re.DOTALL,
+)
+_PYTHON_FENCE_RE = re.compile(r"```python\n.*?```\n?", re.DOTALL)
+_JSON_FENCE_RE = re.compile(r"```json\n.*?```\n?", re.DOTALL)
+
+
+def filter_pack_examples(text: str, generator: str = "json") -> str:
+    """Keep only the example dialect the active generator writes.
+
+    Context packs are dialect-first: each ``python`` fence is canonical and the
+    ``json`` fence under it is a generated twin. ``generator="json"`` keeps the
+    twins and drops the dialect; ``generator="dsl"`` does the reverse. Prose and
+    mode-neutral ``text`` fences are untouched either way.
+    """
+    if generator == "dsl":
+        body = _TWIN_PAIR_RE.sub("", text)
+        body = _JSON_FENCE_RE.sub("", body)
+        body = _TWIN_MARKER_RE.sub("", body)
+    else:
+        body = _PYTHON_FENCE_RE.sub("", text)
+        body = _TWIN_MARKER_RE.sub("", body)
+    return re.sub(r"\n{3,}", "\n\n", body).strip()
+
 
 class ContextPackError(ValueError):
     """An unknown or invalid context-pack name."""
@@ -64,17 +98,23 @@ def _summary(text: str) -> str:
     return ""
 
 
-def load_context_pack(name: str) -> str:
-    """Load one optional context pack by slug (for example ``clones``)."""
+def load_context_pack(name: str, generator: str = "json") -> str:
+    """Load one optional context pack by slug (for example ``clones``).
+
+    ``generator`` selects the example dialect: ``"json"`` keeps the generated
+    JSON twins (the historical pack content), ``"dsl"`` keeps the canonical
+    Scratch-Python fences. The default stays backward compatible.
+    """
     target = _pack_path(name)
     try:
         stat = target.stat()
     except OSError:
         raise ContextPackError(f"unknown context pack {name!r}") from None
     try:
-        return _read_cached(str(target), stat.st_mtime_ns, stat.st_size).strip()
+        text = _read_cached(str(target), stat.st_mtime_ns, stat.st_size)
     except OSError:
         raise ContextPackError(f"cannot read context pack {name!r}") from None
+    return filter_pack_examples(text, generator)
 
 
 def available_context_packs() -> dict[str, str]:
@@ -95,7 +135,9 @@ def available_context_packs() -> dict[str, str]:
     return found
 
 
-def load_context_packs(names: list[str] | tuple[str, ...]) -> str:
+def load_context_packs(
+    names: list[str] | tuple[str, ...], generator: str = "json"
+) -> str:
     """Join the requested packs into one prompt section, preserving order."""
     if not names:
         return ""
@@ -106,7 +148,7 @@ def load_context_packs(names: list[str] | tuple[str, ...]) -> str:
         if key in seen:
             continue
         seen.add(key)
-        text = load_context_pack(key)
+        text = load_context_pack(key, generator)
         parts.append(f"# Loaded context pack: {key}\n\n{text}")
     return "\n\n".join(parts)
 

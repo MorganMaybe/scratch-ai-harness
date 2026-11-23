@@ -46,31 +46,83 @@ The core blocks are:
 
 Two scripts on the bullet sprite:
 
+```python
+@on_flag(target="Bullet", label="fire")
+def fire():
+    while True:
+        create_clone("myself")
+        wait(0.35)
+
+
+@on_clone_start(target="Bullet", label="clone_life")
+def clone_life():
+    goto_xy(0, -140)
+    for _ in range(40):
+        change_y(8)
+    delete_clone()
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 [
   {
     "action": "add_script",
     "target": "Bullet",
     "label": "fire",
-    "hat": { "op": "when_flag_clicked" },
+    "hat": {
+      "op": "when_flag_clicked"
+    },
     "body": [
-      { "op": "forever", "body": [
-        { "op": "create_clone", "args": { "target": "myself" } },
-        { "op": "wait", "args": { "seconds": 0.35 } }
-      ] }
+      {
+        "op": "forever",
+        "body": [
+          {
+            "op": "create_clone",
+            "args": {
+              "target": "myself"
+            }
+          },
+          {
+            "op": "wait",
+            "args": {
+              "seconds": 0.35
+            }
+          }
+        ]
+      }
     ]
   },
   {
     "action": "add_script",
     "target": "Bullet",
     "label": "clone_life",
-    "hat": { "op": "when_clone_start" },
+    "hat": {
+      "op": "when_clone_start"
+    },
     "body": [
-      { "op": "goto_xy", "args": { "x": 0, "y": -140 } },
-      { "op": "repeat", "args": { "count": 40 }, "body": [
-        { "op": "change_y", "args": { "dy": 8 } }
-      ] },
-      { "op": "delete_clone" }
+      {
+        "op": "goto_xy",
+        "args": {
+          "x": 0,
+          "y": -140
+        }
+      },
+      {
+        "op": "repeat",
+        "args": {
+          "count": 40
+        },
+        "body": [
+          {
+            "op": "change_y",
+            "args": {
+              "dy": 8
+            }
+          }
+        ]
+      },
+      {
+        "op": "delete_clone"
+      }
     ]
   }
 ]
@@ -83,27 +135,75 @@ visible; the clones carry the visible action.
 
 `when_clone_start` is a good place for `random`:
 
+```python
+@on_clone_start(target="Spark", label="spark_life")
+def spark_life():
+    life = 30
+    for _ in range(30):
+        change_x(random(-3, 3))
+        change_y(-2)
+        life -= 1
+    delete_clone()
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 {
   "action": "add_script",
   "target": "Spark",
   "label": "spark_life",
-  "hat": { "op": "when_clone_start" },
+  "hat": {
+    "op": "when_clone_start"
+  },
   "body": [
-    { "op": "set_var", "args": { "name": "life", "value": 30 } },
-    { "op": "repeat", "args": { "count": 30 }, "body": [
-      { "op": "change_x", "args": { "dx": {
-        "op": "random", "args": { "from": -3, "to": 3 } } } },
-      { "op": "change_y", "args": { "dy": -2 } },
-      { "op": "change_var", "args": { "name": "life", "delta": -1 } }
-    ] },
-    { "op": "delete_clone" }
+    {
+      "op": "set_var",
+      "args": {
+        "name": "life",
+        "value": 30
+      }
+    },
+    {
+      "op": "repeat",
+      "args": {
+        "count": 30
+      },
+      "body": [
+        {
+          "op": "change_x",
+          "args": {
+            "dx": {
+              "op": "random",
+              "args": {
+                "from": -3,
+                "to": 3
+              }
+            }
+          }
+        },
+        {
+          "op": "change_y",
+          "args": {
+            "dy": -2
+          }
+        },
+        {
+          "op": "change_var",
+          "args": {
+            "name": "life",
+            "delta": -1
+          }
+        }
+      ]
+    },
+    {
+      "op": "delete_clone"
+    }
   ]
 }
 ```
 
-Use a local variable (`scope: "sprite"`) for per-clone state such as `life`.
-Global variables are shared by every clone.
+Use a local variable (sprite scope; `scope="sprite"` when you create it) for
+per-clone state such as `life`. Global variables are shared by every clone.
 
 ## Pattern: tiled scenery with clones
 
@@ -111,33 +211,98 @@ To build a row of tiles, use a parent loop with a global `spawn_index`, create a
 clone per tile, and have each clone read that index in `when_clone_start` into a
 local variable:
 
+```python
+@on_flag(target="Tile", label="build_row")
+def build_row():
+    spawn_index = 0
+    for _ in range(12):
+        create_clone("myself")
+        spawn_index += 1
+
+
+@on_clone_start(target="Tile", label="tile_place")
+def tile_place():
+    tile_index = spawn_index
+    set_x(tile_index * 40)
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 [
   {
     "action": "add_script",
     "target": "Tile",
     "label": "build_row",
-    "hat": { "op": "when_flag_clicked" },
+    "hat": {
+      "op": "when_flag_clicked"
+    },
     "body": [
-      { "op": "set_var", "args": { "name": "spawn_index", "value": 0 } },
-      { "op": "repeat", "args": { "count": 12 }, "body": [
-        { "op": "create_clone", "args": { "target": "myself" } },
-        { "op": "change_var", "args": { "name": "spawn_index", "delta": 1 } }
-      ] }
+      {
+        "op": "set_var",
+        "args": {
+          "name": "spawn_index",
+          "value": 0
+        }
+      },
+      {
+        "op": "repeat",
+        "args": {
+          "count": 12
+        },
+        "body": [
+          {
+            "op": "create_clone",
+            "args": {
+              "target": "myself"
+            }
+          },
+          {
+            "op": "change_var",
+            "args": {
+              "name": "spawn_index",
+              "delta": 1
+            }
+          }
+        ]
+      }
     ]
   },
   {
     "action": "add_script",
     "target": "Tile",
     "label": "tile_place",
-    "hat": { "op": "when_clone_start" },
+    "hat": {
+      "op": "when_clone_start"
+    },
     "body": [
-      { "op": "set_var", "args": { "name": "tile_index", "value": {
-        "op": "get_var", "args": { "name": "spawn_index" } } } },
-      { "op": "set_x", "args": { "x": {
-        "op": "*", "args": { "a": {
-          "op": "get_var", "args": { "name": "tile_index" } },
-          "b": 40 } } } }
+      {
+        "op": "set_var",
+        "args": {
+          "name": "tile_index",
+          "value": {
+            "op": "get_var",
+            "args": {
+              "name": "spawn_index"
+            }
+          }
+        }
+      },
+      {
+        "op": "set_x",
+        "args": {
+          "x": {
+            "op": "multiply",
+            "args": {
+              "a": {
+                "op": "get_var",
+                "args": {
+                  "name": "tile_index"
+                }
+              },
+              "b": 40
+            }
+          }
+        }
+      }
     ]
   }
 ]

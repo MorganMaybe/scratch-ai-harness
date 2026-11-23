@@ -33,10 +33,10 @@ limit, bullets/particles/tiles), `games` (score/HUD, game over, platformer and
 flappy physics), `scrolling` (camera, parallax, tile maps), `pen-3d` (3D
 projection, meshes, pen/frame limits).
 
-**Packs still show block examples as JSON.** Op and argument names match the
-dialect functions: read `{"op": "move", "args": {"steps": 10}}` as `move(10)`,
-and `{"op": "random", "args": {"from": -20, "to": 20}}` as
-`random(0 - 20, 20)` (unary minus is rejected; section 5).
+**Loaded packs show block examples in this dialect**, with the same function
+names and argument order as this reference. The JSON blocks you may see in the
+repository are generated from those examples for `generator = json`; never
+write JSON in a change-set reply.
 
 When the image supplies AI-owned script bodies, the prompt adds an index such
 as `Bat: ai-1 chase, ai-4 reset`. Ask for detail only when it appears there; the

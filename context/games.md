@@ -41,49 +41,233 @@ The player script must reference every platform sprite it creates. A platform
 sprite that appears in no `touching` test is decoration: the actor falls
 through it. Landing belongs in the gravity loop, checked while falling:
 
+```python
+@on_flag(target="Cat", label="platformer")
+def platformer():
+    goto_xy(-180, 100)
+    vy = 0
+    while True:
+        if key_pressed("right arrow"):
+            change_x(4)
+        if key_pressed("left arrow"):
+            change_x(-4)
+        if key_pressed("up arrow") and vy == 0:
+            vy = 10
+        change_y(vy)
+        vy -= 1
+        if touching("Ground") or touching("Platform1") or touching("Platform2"):
+            change_y(6)
+            vy = 0
+        if y_position() < -140:
+            set_y(-140)
+            vy = 0
+        wait(0.04)
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 {
-  "action": "add_script", "target": "Cat", "label": "platformer",
-  "hat": { "op": "when_flag_clicked" }, "body": [
-    { "op": "goto_xy", "args": { "x": -180, "y": 100 } },
-    { "op": "set_var", "args": { "name": "vy", "value": 0 } },
-    { "op": "forever", "body": [
-      { "op": "if", "args": { "condition": { "op": "key_pressed", "args": { "key": "right arrow" } } },
-        "body": [ { "op": "change_x", "args": { "dx": 4 } } ] },
-      { "op": "if", "args": { "condition": { "op": "key_pressed", "args": { "key": "left arrow" } } },
-        "body": [ { "op": "change_x", "args": { "dx": -4 } } ] },
-      { "op": "if", "args": { "condition": {
-          "op": "and",
+  "action": "add_script",
+  "target": "Cat",
+  "label": "platformer",
+  "hat": {
+    "op": "when_flag_clicked"
+  },
+  "body": [
+    {
+      "op": "goto_xy",
+      "args": {
+        "x": -180,
+        "y": 100
+      }
+    },
+    {
+      "op": "set_var",
+      "args": {
+        "name": "vy",
+        "value": 0
+      }
+    },
+    {
+      "op": "forever",
+      "body": [
+        {
+          "op": "if",
           "args": {
-            "a": { "op": "key_pressed", "args": { "key": "up arrow" } },
-            "b": { "op": "equals", "args": {
-                "a": { "op": "get_var", "args": { "name": "vy" } }, "b": 0 } }
-          } } },
-        "body": [
-          { "op": "set_var", "args": { "name": "vy", "value": 10 } }
-        ] },
-      { "op": "change_y", "args": { "dy": { "op": "get_var", "args": { "name": "vy" } } } },
-      { "op": "change_var", "args": { "name": "vy", "delta": -1 } },
-      { "op": "if", "args": { "condition": {
-          "op": "or",
+            "condition": {
+              "op": "key_pressed",
+              "args": {
+                "key": "right arrow"
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "change_x",
+              "args": {
+                "dx": 4
+              }
+            }
+          ]
+        },
+        {
+          "op": "if",
           "args": {
-            "a": { "op": "or", "args": {
-                "a": { "op": "touching", "args": { "target": "Ground" } },
-                "b": { "op": "touching", "args": { "target": "Platform1" } } } },
-            "b": { "op": "touching", "args": { "target": "Platform2" } }
-          } } },
-        "body": [
-          { "op": "change_y", "args": { "dy": 6 } },
-          { "op": "set_var", "args": { "name": "vy", "value": 0 } }
-        ] },
-      { "op": "if", "args": { "condition": {
-          "op": "less_than", "args": { "a": { "op": "y_position" }, "b": -140 } } },
-        "body": [
-          { "op": "set_y", "args": { "y": -140 } },
-          { "op": "set_var", "args": { "name": "vy", "value": 0 } }
-        ] },
-      { "op": "wait", "args": { "seconds": 0.04 } }
-    ] }
+            "condition": {
+              "op": "key_pressed",
+              "args": {
+                "key": "left arrow"
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "change_x",
+              "args": {
+                "dx": -4
+              }
+            }
+          ]
+        },
+        {
+          "op": "if",
+          "args": {
+            "condition": {
+              "op": "and",
+              "args": {
+                "a": {
+                  "op": "key_pressed",
+                  "args": {
+                    "key": "up arrow"
+                  }
+                },
+                "b": {
+                  "op": "equals",
+                  "args": {
+                    "a": {
+                      "op": "get_var",
+                      "args": {
+                        "name": "vy"
+                      }
+                    },
+                    "b": 0
+                  }
+                }
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "set_var",
+              "args": {
+                "name": "vy",
+                "value": 10
+              }
+            }
+          ]
+        },
+        {
+          "op": "change_y",
+          "args": {
+            "dy": {
+              "op": "get_var",
+              "args": {
+                "name": "vy"
+              }
+            }
+          }
+        },
+        {
+          "op": "change_var",
+          "args": {
+            "name": "vy",
+            "delta": -1
+          }
+        },
+        {
+          "op": "if",
+          "args": {
+            "condition": {
+              "op": "or",
+              "args": {
+                "a": {
+                  "op": "or",
+                  "args": {
+                    "a": {
+                      "op": "touching",
+                      "args": {
+                        "target": "Ground"
+                      }
+                    },
+                    "b": {
+                      "op": "touching",
+                      "args": {
+                        "target": "Platform1"
+                      }
+                    }
+                  }
+                },
+                "b": {
+                  "op": "touching",
+                  "args": {
+                    "target": "Platform2"
+                  }
+                }
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "change_y",
+              "args": {
+                "dy": 6
+              }
+            },
+            {
+              "op": "set_var",
+              "args": {
+                "name": "vy",
+                "value": 0
+              }
+            }
+          ]
+        },
+        {
+          "op": "if",
+          "args": {
+            "condition": {
+              "op": "less_than",
+              "args": {
+                "a": {
+                  "op": "y_position"
+                },
+                "b": -140
+              }
+            }
+          },
+          "body": [
+            {
+              "op": "set_y",
+              "args": {
+                "y": -140
+              }
+            },
+            {
+              "op": "set_var",
+              "args": {
+                "name": "vy",
+                "value": 0
+              }
+            }
+          ]
+        },
+        {
+          "op": "wait",
+          "args": {
+            "seconds": 0.04
+          }
+        }
+      ]
+    }
   ]
 }
 ```
@@ -101,23 +285,81 @@ and locals, so keep the original **visible** and parked off-stage — a hidden
 original spawns hidden clones. Score once per pipe as it passes the bird,
 using a per-clone `scored` flag (locals copy to clones):
 
+```python
+create_sprite("Pipe", costumes=["Geometry/line.png"], x=300, y=0, direction=90,
+              size=140, visible=True, rotation_style="don't rotate")
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
-{ "action": "create_sprite", "name": "Pipe",
-  "costumes": [ { "library": "Geometry/line.png" } ],
-  "x": 300, "y": 0, "direction": 90, "size": 140, "visible": true,
-  "rotation_style": "don't rotate" }
+{
+  "action": "create_sprite",
+  "name": "Pipe",
+  "costumes": [
+    {
+      "library": "Geometry/line.png"
+    }
+  ],
+  "x": 300,
+  "y": 0,
+  "direction": 90,
+  "size": 140,
+  "visible": true,
+  "rotation_style": "don't rotate"
+}
 ```
 
+```python
+@on_flag(target="Pipe", label="spawn")
+def spawn():
+    while True:
+        create_clone("myself")
+        wait(1.6)
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
-{ "action": "add_script", "target": "Pipe", "label": "spawn",
-  "hat": { "op": "when_flag_clicked" }, "body": [
-    { "op": "forever", "body": [
-      { "op": "create_clone", "args": { "target": "myself" } },
-      { "op": "wait", "args": { "seconds": 1.6 } }
-    ] }
-  ] }
+{
+  "action": "add_script",
+  "target": "Pipe",
+  "label": "spawn",
+  "hat": {
+    "op": "when_flag_clicked"
+  },
+  "body": [
+    {
+      "op": "forever",
+      "body": [
+        {
+          "op": "create_clone",
+          "args": {
+            "target": "myself"
+          }
+        },
+        {
+          "op": "wait",
+          "args": {
+            "seconds": 1.6
+          }
+        }
+      ]
+    }
+  ]
+}
 ```
 
+```python
+@on_clone_start(target="Pipe", label="pipe_travel")
+def pipe_travel():
+    goto_xy(260, random(-120, 120))
+    scored = 0
+    while not (x_position() < -280):
+        change_x(-4)
+        if (x_position() < attribute_of("x position", "Bird")) and scored == 0:
+            score += 1
+            scored = 1
+        wait(0.04)
+    delete_clone()
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 {
   "action": "add_script",
@@ -235,6 +477,23 @@ using a per-clone `scored` flag (locals copy to clones):
 }
 ```
 
+```python
+@on_flag(target="Bird", label="fly")
+def fly():
+    goto_xy(-120, 0)
+    vy = 0
+    while not (game_over == 1):
+        if key_pressed("space"):
+            vy = 8
+            switch_costume("dove1-b")
+        change_y(vy)
+        vy -= 1
+        if touching("Pipe") or (touching("Ground") or (y_position() < -170)):
+            game_over = 1
+            say(join("Game over! Score: ", score))
+        wait(0.04)
+```
+<!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
 {
   "action": "add_script",
@@ -402,11 +661,11 @@ The library has no literal "platform" or "pipe" art. These read as game
 geometry and are all real paths:
 
 - Flat bar / beam / pipe body: ALWAYS `Geometry/line.png` — a plain red
-  bar. Use `direction: 0` for a vertical pipe, `90` for a horizontal beam;
-  scale with `set_size` / the create_sprite `size` field as needed. Never use
-  `Players/fantasy1-a.png` (or another `Players/fantasy1-*` character) or any
-  character art for pipes, platforms or walls — those are cartoon creatures,
-  not game geometry.
+  bar. Use direction `0` for a vertical pipe, `90` for a horizontal beam;
+  scale with `set_size` or the `create_sprite` size argument as needed. Never
+  use `Players/fantasy1-a.png` (or another `Players/fantasy1-*` character) or
+  any character art for pipes, platforms or walls — those are cartoon
+  creatures, not game geometry.
 - Letter blocks (tile platforms): `Letters/Block/a.png` ...
   `Letters/Block/z.png`.
 - Rocky chunk: `Scenery/rock.png`.
@@ -446,8 +705,9 @@ delta 1` (and mirror). Score via `show_variable`. Ball art:
 - Create every variable before the scripts that use it; reset them all in a
   flag script.
 - A `wait` is a block in the body list — never a named field of another
-  block. `{ "op": "wait", "args": { "seconds": 0.04 } }` inside the body,
-  not `"wait": {...}` beside it.
+  block. In JSON mode it is `{ "op": "wait", "args": { "seconds": 0.04 } }`
+  inside the body, not `"wait": {...}` beside it; in the dialect it is a
+  `wait(0.04)` line in the body.
 - Do not run the whole game in one giant script: one script per actor, one
   Stage script for spawning/rounds. Broadcasts start/stop actors.
 - `repeat_until game_over == 1` stops that actor's loop; other actors still
