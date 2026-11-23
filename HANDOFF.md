@@ -21,7 +21,7 @@ alone on purpose.
 | Undo, ownership, registry reconcile | Working |
 | Lazy context packs and sprite script detail | Working |
 | Python bridge, validator, compiler, providers | Working |
-| **Scratch-Python front end (`generator = dsl`)** | **Built behind the config flag; JSON stays the default.** See `PY_DSL_SCOPE.md` and `SCRATCH_AI_DSL_CONTEXT.md`. |
+| **Scratch-Python front end (`generator = dsl`)** | **Built on branch `pydsl`, live-verified end-to-end (bridge + image).** Output-quality iteration and the Phase C ladder pending; JSON stays the default. See §1a below, `PY_DSL_SCOPE.md`, `SCRATCH_AI_DSL_CONTEXT.md`. |
 | **Release image (windowed, no control server)** | **Verified** |
 | **Release bundle (stock media, no secrets)** | **Built, about 50.6 MB** |
 | Tests | **407 passed, 2 skipped** on a fresh clone (media fixture) |
@@ -66,6 +66,69 @@ Build it with:
 
 The builder loads `17c → 16b → 22 → 38 → 29 → 40` into a temporary copy of
 `ScratchAiTesting`, so it doesn't depend on the older methods in the seed.
+
+## 1a. Scratch-Python front end (branch `pydsl`)
+
+All of this lives on the `pydsl` worktree branch (the sibling folder
+`Scratch harness pydsl`); `main` is untouched. Run the DSL bridge from that
+folder with `.\run_live.ps1 -Generator dsl` and the image from the main
+folder as usual. The image's Bridge tab Start button launches the **main
+folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
+
+**Done and verified:**
+
+- `harness/dsl/` transpiler (vocabulary generated from `SPECS`, AST
+  whitelist, line-precise diagnostics), IR renderer with `load_sprite`
+  dialect rendering, `python -m harness.dsl.lint`; `generator = json | dsl`
+  through config, providers, prompts, the agent loop and audit; dialect
+  appendix `SCRATCH_AI_DSL_CONTEXT.md`; `tools/dsl_smoke.py`;
+  `tools/audit.py score --group generator`.
+- Suite: 550 passed, 2 skipped (407 baseline + 143 new). Round-trip: 143
+  historical audit bundles, zero mismatches; the 16 unrenderable bundles are
+  original JSON-era model defects (invented ops, wrong argument names, bad
+  menus) — the error classes this front end turns into parse-time rejections.
+- Live (`deepseek-v4.1-flash`, dsl mode): every observed turn transpiled
+  first-try with zero repairs — square 106, platformer 607–776, HUD 62–123
+  completion tokens; the largest turn (11 changes plus two lazy pack loads)
+  ran 7.8 s wall. JSON-era equivalents cost ~500–3,500 completion tokens
+  with frequent `bad_json` retries. The platformer and triangle turns
+  applied and are visible in the image; the revision flow used `script_id`
+  replacement correctly once the mode-aware registry hint landed.
+
+**Still weak — the honest part:** syntax reliability and token efficiency
+are solved; **output quality is not**. Semantic quality of larger scenes
+(the platformer runs but has not been critiqued), revision discipline
+beyond the two observed cases, and the context packs (`games`, `clones`,
+`scrolling`, `pen-3d`) still teaching in JSON examples. None of that is
+measured yet. **The next task on this branch is the Phase C ladder:**
+same prompts in both modes with `-Audit full`, scored via
+`tools/audit.py score --group generator` (applied-rate, repair rounds,
+tokens, and a human look at the resulting projects). The default flip to
+`dsl` waits on that measurement.
+
+**Runtime notes from the 2026-11-23 live session (learned the hard way):**
+
+- The bridge console window must stay open; closing it kills the bridge.
+- A fresh worktree has no `scratch\base\Media`, so the bridge builds an
+  empty media/preset index and every costume reference fails validation.
+  Copy `Media` from the main folder (61 MB) before live runs.
+- `ScratchAiTesting.image` had gone stale — its dispatcher `step` was an
+  old build, which made the Bridge tab spin on "Refreshing…", left chat
+  turns completed bridge-side but never applied, while dev commands still
+  answered (so the image looked healthy). Rebuilt via
+  `build_image.ps1 -Out ScratchAiTesting -Seed ScratchAI11` +
+  `make_clean_image.ps1`, verified with `probe_step_check.st`. Litmus when
+  the tab misbehaves: load that probe and check the logged step source
+  drains `processSendCompletions` and `processChatUiCompletions`.
+  Immediate in-place fix: `ai_control.py load <repo>\image\38_bridge_usage_ui.st`.
+- NEVER pass the same name as `-Out` and `-Seed` to `build_image.ps1` with
+  `-Force`: it deletes the output (the seed) before copying it. That cost
+  the old image; recovery seeds are `ScratchAI8..11` in `scratch\base`.
+- Probes loaded through the dev channel must keep every statement on one
+  line; multi-line message continuations silently no-op in this loader.
+- The testing image's title-bar X triggers a native `Quit?!` confirm and
+  hides the window; Cancel restores it. Drive the image via
+  `tools\ai_control.py`, not the mouse.
 
 ## 2. Quick start (dev)
 
@@ -184,6 +247,12 @@ character art. See `TRADEMARK_POLICY`.
     `.\tools\make_release_bundle.ps1 -Version <x.y.z> -Force`.
 12. `scratch\base\audit\`, `sessions\`, `tools\media_groups_work\` and the
     runtime media are local and git-ignored.
+13. `build_image.ps1` deletes its output file before copying the seed. Never
+    pass the same name as `-Out` and `-Seed` (especially with `-Force`) —
+    that deletes the seed. Valid seeds are `ScratchAI8..11` in
+    `scratch\base`. After any rebuild, verify with
+    `probes\probe_step_check.st` (the logged step source must drain
+    `processSendCompletions` and `processChatUiCompletions`).
 
 ## 7. Known gaps
 

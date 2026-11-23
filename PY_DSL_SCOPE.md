@@ -30,18 +30,27 @@ Shipped on branch `pydsl`, all offline-tested:
   are inexpressible because the *original JSON-era model output* was invalid
   (invented ops, wrong arg names, bad menus) — the error classes this front
   end turns into parse-time rejections.
-- Live smoke (5 turns, `deepseek-v4.1-flash`): **every turn transpiled
-  first-try, zero repairs, 62–123 completion tokens** (~1.2–1.4 s). No
-  `bad_json`, no validation round-trips. The JSON era needed ~500–3,500
-  completion tokens for equivalent turns with frequent `bad_json` retries.
-- **Open finding (Phase C):** on revision prompts the model **adds** a new
-  script (`draw_square_200`) rather than **replacing** via
-  `script_id="ai-1"` — even with an explicit "change the draw_square script"
-  request and the dialect-shaped registry hint. The mechanics work (tests
-  cover replace via script_id); revision *discipline* is a prompt-tuning
-  question for the ladder: consider promoting the replace rule from the
-  appendix into `DSL_SYSTEM_PROMPT` itself, and measure with
-  `tools/audit.py score --group generator`.
+- Live smoke (2026-11-23, `deepseek-v4.1-flash`, through the real image and
+  `tools\ai_control.py`): **every observed turn transpiled first-try with
+  zero repairs** — square 106, platformer 607–776, HUD 62–123 completion
+  tokens; the largest turn (11 changes plus two lazy pack loads) ran 7.8 s
+  wall. The JSON era needed ~500–3,500 completion tokens for equivalent
+  turns with frequent `bad_json` retries. The revision flow used
+  `script_id` replacement correctly once the mode-aware registry hint
+  landed; the earlier add-not-replace pattern has not recurred.
+- **Open finding (Phase C):** reliability and efficiency are solved;
+  **output quality is not measured**. Semantic quality of larger scenes,
+  revision discipline across more cases, and the context packs (still
+  teaching in JSON) are the active front. Run the ladder: same prompts in
+  both modes with `-Audit full`, scored with
+  `tools/audit.py score --group generator`, plus a human look at the
+  resulting projects; the default flip to `dsl` waits on it.
+- **Runtime prerequisites learned live:** a worktree bridge needs
+  `scratch\base\media` copied in (61 MB) or the media/preset index is
+  empty and every costume reference fails validation; the bridge console
+  window must stay open; the dev image itself was rebuilt on 2026-11-23
+  after its dispatcher `step` was found stale (`HANDOFF.md` §1a has the
+  full story and the litmus probe).
 
 ---
 
