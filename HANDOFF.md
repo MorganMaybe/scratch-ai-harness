@@ -155,20 +155,36 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   single flagged op was a `set_x(x_position()+4)` -> `change_x(run_speed)`
   improvement), at ~2-3 extra attempts per revision. Score future runs with
   `tools\revision_fidelity.py <ladder-session-dir>`.
+- **No-op replace guard + acknowledgment replies (2026-11-23, from the
+  audited doodle-jump session):** a later turn re-sent three scripts
+  byte-identical to the current ones while the chat claimed "Platforms
+  start lower" — narrating the status quo as a change. The bridge now
+  detects a `replace_script` whose hat, body and label match the current
+  tuples (failing open whenever decompilation is uncertain). Fully no-op
+  turns get one guard round trip showing the identical bodies and two
+  outs: make the real change, or reply that the request is already
+  satisfied. Mixed turns strip the no-ops with a `warning:` line and apply
+  the rest. The **acknowledgment reply** is legal end to end in both
+  generators: an empty `changes` list validates and applies nothing while
+  the summary still reaches the chat; a `summary(...)`/`notes(...)`-only
+  dialect module is accepted (a truly empty module still errors). Blind
+  real replaces still get the replace echo; the guard runs first.
 
 **Still weak — the honest part:** syntax reliability and token efficiency
-are solved; **output quality is not**. Semantic quality of larger scenes
-(the platformer runs but has not been critiqued), revision discipline
-beyond the two observed cases, and the context packs (`games`, `clones`,
-`scrolling`, `pen-3d`) are the open front. The three packs with change-set
-examples are now dialect-first, with JSON twins generated from the dialect,
-and the bridge filters them per generator; how much that improves pack-driven
-turns is unmeasured. **The next task on this branch is running the Phase C
-ladder** (`python tools\ladder.py -Runs 3`, then `tools/audit.py score
---dir <stamp-dir> --group generator`) and scoring `docs\LADDER_RUBRIC.md`
-against the bundles plus one live image pass per mode (applied-rate,
-repair rounds, tokens, and a human look at the resulting projects). The
-default flip to `dsl` waits on that measurement.
+are solved; **output quality is not**. The ladder has now been run live
+(twice, both modes, 100% applied; dsl ahead on tokens and attempts), packs
+are dialect-first, and revision fidelity is fixed and measured. The open
+front is **conversation memory**: the 2026-11-23 audited doodle-jump session
+showed referential requests ("make it smaller", "start lower") landing on a
+stateless model, and a fully no-op turn narrated as new changes (the no-op
+guard now catches the mechanical half; nothing yet gives the model the
+conversation that would prevent it). **The next task on this branch is chat
+history + rolling summary — see `CHAT_HISTORY_SCOPE.md`** for the full plan
+(store, ack-gated recording, prompt section with its own budget stages,
+phases, tests, success criteria). It is bridge-side only: zero Squeak and
+zero wire work. After it lands, replay the doodle-jump flow with
+`-Audit full` (build → "make everything smaller" → "start lower") and
+decide the `dsl` default flip on the accumulated ladder evidence.
 
 **Runtime notes from the 2026-11-23 live session (learned the hard way):**
 
@@ -361,6 +377,7 @@ with `tools\stop_bridge.ps1`. Profile and audit changes still come from
 | `PY_DSL_SCOPE.md` | Python-subset front end: implemented (Phases A–B) with live-smoke findings; Phase C ladder pending |
 | `tools/ladder.py` + `docs/LADDER_RUBRIC.md` | Phase C benchmark: both generators, audit bundles, flip verdict, human rubric |
 | `tools/revision_fidelity.py` | revision scorer: dropped-op diffs + load/echo classification from ladder bundles |
+| `CHAT_HISTORY_SCOPE.md` | **the next task**: conversation history + rolling summary, full plan with anchors, phases and success criteria |
 | `tools/render_pack_json.py` + `tools/pack_examples.py` | context packs: canonical dialect examples, generated JSON twins, per-pack SETUP, `--check` sync |
 | `tools/validate_packs.py` | offline validate/compile for the games, clones and scrolling examples |
 | `CHAT_UI_SCOPE.md` | docked rail |
