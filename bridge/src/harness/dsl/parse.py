@@ -9,11 +9,13 @@ validator still runs afterwards and remains the authority on project context.
 from __future__ import annotations
 
 import ast
+import difflib
 from typing import Any
 
 from ..block_ir import Change, ChangeSet, IRError
 from ..catalog import SPRITE_TARGET_OPS, ArgSpec, spec_for
 from ..context import ProjectContext
+from ..media import BACKDROP, COSTUME, MediaError, default_library
 from .errors import MAX_DIAGNOSTICS, DSLError, DSLErrors
 from .vocab import (
     CALLABLE_SPECS,
@@ -127,6 +129,14 @@ CROSSVAR_MESSAGE = (
     "read it - use attribute_of/set_attribute_of or broadcast to a script "
     "owned by {owner}."
 )
+TARGET_MESSAGE = "{op} target '{name}' does not exist yet"
+SPRITESCOPE_MESSAGE = (
+    "{op}() with scope='sprite' needs target='SpriteName'"
+)
+STAGETARGET_MESSAGE = "{op} target 'Stage' is not a sprite"
+UNKNOWNCOSTUME_MESSAGE = "unknown costume '{name}' for '{target}'"
+UNKNOWNSOUND_MESSAGE = "unknown sound '{name}' for '{target}'"
+UNKNOWNBACKDROP_MESSAGE = "unknown backdrop '{name}'"
 MODASSIGN_MESSAGE = (
     "assignments at module level are not part of the dialect; create "
     'variables with create_variable(name, scope="global", initial=...).'
@@ -211,6 +221,40 @@ def _duplicate_argument(op: str, name: str, line: int | None) -> DSLError:
     )
 
 
+def _truncate_names(names: list[str], limit: int = 12) -> str:
+    """Comma-joined sorted names, capped so a hint stays one readable line."""
+    ordered = sorted(dict.fromkeys(names), key=str.casefold)
+    if not ordered:
+        return "none"
+    if len(ordered) <= limit:
+        return ", ".join(ordered)
+    remaining = len(ordered) - limit
+    return ", ".join(ordered[:limit]) + f", ... ({remaining} more)"
+
+
+def _quote_names(names: list[str]) -> str:
+    return ", ".join(repr(name) for name in names)
+
+
+def _library_stem(path: str) -> str:
+    """Costume/backdrop name Scratch derives from a library path."""
+    name = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    stem, dot, _ = name.rpartition(".")
+    return stem if dot and stem else name
+
+
+def _media_error(exc: MediaError, line: int | None) -> DSLError:
+    """Turn a resolver failure into a diagnostic with the suggestions as hint."""
+    message = str(exc)
+    hint = None
+    if exc.suggestions:
+        suffix = "; near matches: " + ", ".join(exc.suggestions)
+        if message.endswith(suffix):
+            message = message[: -len(suffix)]
+        hint = "near matches: " + ", ".join(exc.suggestions)
+    return DSLError(message, line=line, hint=hint)
+
+
 class _Transpiler:
     """One reply's walk over the AST."""
 
@@ -222,6 +266,8 @@ class _Transpiler:
         self.notes = ""
         self.created_globals: set[str] = set()
         self.created_sprite_vars: dict[str, set[str]] = {}
+        #: Costume/backdrop names this module already added, per target.
+        self.created_costumes: dict[str, set[str]] = {}
         self.sprite_names: set[str] = set(
             context.sprite_names() if context is not None else ()
         )
@@ -319,7 +365,7 @@ class _Transpiler:
             raise DSLError(
                 UNKNOWNFN_MESSAGE.format(name=name), line=call.lineno
             )
-        values = self._bind_module(spec, call)
+        values, raw = self._bind_module(spec, call)
         if not spec.action:
             if name == "summary":
                 self.summary = values["text"]
@@ -332,6 +378,8 @@ class _Transpiler:
                 raise DSLError(
                     COLLIDE_MESSAGE.format(name=variable), line=call.lineno
                 )
+        self._check_module_target(spec, values, call.lineno)
+        self._check_module_media(spec, values, raw, call.lineno)
         data: dict[str, Any] = {"action": spec.action}
         for param in spec.params:
             if param.name in values and values[param.name] is not None:
@@ -345,14 +393,29 @@ class _Transpiler:
                 self.created_sprite_vars.setdefault(target, set()).add(variable)
             else:
                 self.created_globals.add(variable)
-        elif spec.action in {"create_sprite", "duplicate_sprite"}:
+        elif spec.action == "create_sprite":
             self.sprite_names.add(values["name"])
+            self.created_costumes[values["name"]] = self._created_costume_names(
+                values
+            )
+        elif spec.action == "duplicate_sprite":
+            self.sprite_names.add(values["name"])
+            self.created_costumes[values["name"]] = set(
+                self._known_costumes(values["target"])
+            )
         elif spec.action == "delete_sprite":
             self.sprite_names.discard(values["target"])
+            self.created_costumes.pop(values["target"], None)
+        elif spec.action == "add_costume":
+            name = values.get("name") or _library_stem(values["library"])
+            self.created_costumes.setdefault(values["target"], set()).add(name)
+        elif spec.action == "set_backdrop":
+            name = values.get("name") or _library_stem(values["library"])
+            self.created_costumes.setdefault("Stage", set()).add(name)
 
     def _bind_module(
         self, spec: ModuleCallSpec, call: ast.Call
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, ast.expr]]:
         names = [param.name for param in spec.params]
         by_name = {param.name: param for param in spec.params}
         if len(call.args) > len(names):
@@ -405,7 +468,7 @@ class _Transpiler:
             values[param.name] = self._check_module_type(
                 spec, param, literal, raw[param.name]
             )
-        return values
+        return values, raw
 
     def _module_literal(self, node: ast.expr) -> Any:
         if isinstance(node, ast.Constant):
@@ -501,6 +564,228 @@ class _Transpiler:
                     line=line,
                 )
         return value
+
+    # -- context and media gates -----------------------------------------
+
+    def _valid_targets(self) -> list[str]:
+        names = ["Stage"]
+        names.extend(
+            sorted(
+                (name for name in self.sprite_names if name != "Stage"),
+                key=str.casefold,
+            )
+        )
+        return names
+
+    def _sprites_hint(self, name: str | None = None) -> str:
+        valid = sorted(self.sprite_names, key=str.casefold)
+        parts: list[str] = []
+        if name is not None:
+            close = difflib.get_close_matches(name, valid, n=3, cutoff=0.6)
+            if close:
+                parts.append("did you mean " + _quote_names(close) + "?")
+            else:
+                parts.append(
+                    f"create it first with create_sprite({name!r}, ...)."
+                )
+        parts.append("valid sprite targets: " + _truncate_names(valid) + ".")
+        return " ".join(parts)
+
+    def _target_hint(self, name: str) -> str:
+        valid = self._valid_targets()
+        close = difflib.get_close_matches(name, valid, n=3, cutoff=0.6)
+        if close:
+            first = "did you mean " + _quote_names(close) + "?"
+        else:
+            first = f"create it first with create_sprite({name!r}, ...)."
+        return first + " valid targets: " + _truncate_names(valid) + "."
+
+    def _check_module_target(
+        self, spec: ModuleCallSpec, values: dict[str, Any], line: int | None
+    ) -> None:
+        """Reject module changes aimed at a sprite the project does not have."""
+        if self.context is None:
+            return
+        if spec.action in {"create_variable", "create_list"}:
+            if values.get("scope", "global") != "sprite":
+                return
+            target = values.get("target")
+            if not target:
+                raise DSLError(
+                    SPRITESCOPE_MESSAGE.format(op=spec.name),
+                    line=line,
+                    hint=self._sprites_hint(),
+                )
+            self._require_known_sprite(target, line, f"{spec.name}()")
+            return
+        if spec.action in {
+            "duplicate_sprite",
+            "delete_sprite",
+            "set_sprite",
+            "add_costume",
+        }:
+            self._require_known_sprite(
+                values["target"],
+                line,
+                f"{spec.name}()",
+                allow_stage=spec.action == "add_costume",
+            )
+
+    def _require_known_sprite(
+        self, name: str, line: int | None, op: str, allow_stage: bool = False
+    ) -> None:
+        if self.context is None:
+            return
+        if name.casefold() == "stage":
+            if allow_stage:
+                return
+            raise DSLError(
+                STAGETARGET_MESSAGE.format(op=op),
+                line=line,
+                hint=self._sprites_hint(),
+            )
+        if name in self.sprite_names:
+            return
+        raise DSLError(
+            TARGET_MESSAGE.format(op=op, name=name),
+            line=line,
+            hint=self._target_hint(name),
+        )
+
+    def _check_module_media(
+        self,
+        spec: ModuleCallSpec,
+        values: dict[str, Any],
+        raw: dict[str, ast.expr],
+        default_line: int | None,
+    ) -> None:
+        """Resolve library paths and presets while the module call is parsed."""
+        jobs: list[tuple[str, str, int | None]] = []
+        if spec.action == "create_sprite":
+            costumes = raw.get("costumes")
+            for index, path in enumerate(values.get("costumes") or []):
+                line = default_line
+                if isinstance(costumes, ast.List) and index < len(costumes.elts):
+                    line = _line(costumes.elts[index])
+                jobs.append((COSTUME, path, line))
+            preset = values.get("preset")
+            if preset is not None:
+                jobs.append(("preset", preset, _line(raw["preset"])))
+        elif spec.action == "add_costume" and values.get("library"):
+            target = str(values.get("target", ""))
+            kind = BACKDROP if target.casefold() == "stage" else COSTUME
+            jobs.append((kind, values["library"], _line(raw["library"])))
+        elif spec.action == "set_backdrop" and values.get("library"):
+            jobs.append(
+                (BACKDROP, values["library"], _line(raw["library"]))
+            )
+        if not jobs:
+            return
+        if not self._has_media_knowledge():
+            return
+        library = default_library()
+        if not library.assets():
+            return
+        for kind, query, line in jobs:
+            try:
+                if kind == "preset":
+                    library.resolve_sprite(query)
+                else:
+                    library.resolve(kind, query)
+            except MediaError as exc:
+                raise _media_error(exc, line) from None
+
+    def _has_media_knowledge(self) -> bool:
+        """Whether the context reports costumes/sounds to compare against.
+
+        A live project always does. A context built for a script-only replay
+        (the historical round-trip corpus) does not, and its media names come
+        from a different stock library generation, so resolving them against
+        the installed tree would report false failures.
+        """
+        if self.context is None:
+            return True
+        return any(
+            sprite.costumes or sprite.sounds
+            for sprite in self.context.sprites.values()
+        )
+
+    def _created_costume_names(self, values: dict[str, Any]) -> set[str]:
+        names = {_library_stem(path) for path in values.get("costumes") or []}
+        preset_name = values.get("preset")
+        if preset_name:
+            try:
+                preset = default_library().resolve_sprite(preset_name)
+            except MediaError:
+                pass
+            else:
+                names.update(entry.name for entry in preset.costumes)
+        return names
+
+    def _known_costumes(self, target: str) -> set[str]:
+        known = set(self.created_costumes.get(target, ()))
+        if self.context is not None:
+            sprite = self.context.sprites.get(target)
+            if sprite is not None:
+                known.update(sprite.costumes)
+        return known
+
+    def _known_sounds(self, target: str) -> set[str]:
+        if self.context is None:
+            return set()
+        sprite = self.context.sprites.get(target)
+        return set(sprite.sounds) if sprite is not None else set()
+
+    def _known_backdrops(self) -> set[str]:
+        return self._known_costumes("Stage")
+
+    def _known_hint(
+        self, label: str, known: set[str], name: str
+    ) -> str:
+        pool = sorted(known, key=str.casefold)
+        close = difflib.get_close_matches(name, pool, n=3, cutoff=0.55)
+        listing = f"{label}: {_truncate_names(pool)}."
+        if close:
+            return "did you mean " + _quote_names(close) + "? " + listing
+        return listing
+
+    def _check_command_name(
+        self, op: str, arg: str, value: str, line: int | None
+    ) -> None:
+        if self.context is None:
+            return
+        if op == "switch_costume" and arg == "costume":
+            known = self._known_costumes(self.current_target)
+            if known and value not in known:
+                raise DSLError(
+                    UNKNOWNCOSTUME_MESSAGE.format(
+                        name=value, target=self.current_target
+                    ),
+                    line=line,
+                    hint=self._known_hint(
+                        f"costumes of '{self.current_target}'", known, value
+                    ),
+                )
+        elif op in {"play_sound", "play_sound_until_done"} and arg == "sound":
+            known = self._known_sounds(self.current_target)
+            if known and value not in known:
+                raise DSLError(
+                    UNKNOWNSOUND_MESSAGE.format(
+                        name=value, target=self.current_target
+                    ),
+                    line=line,
+                    hint=self._known_hint(
+                        f"sounds of '{self.current_target}'", known, value
+                    ),
+                )
+        elif op == "switch_backdrop" and arg == "backdrop":
+            known = self._known_backdrops()
+            if known and value not in known:
+                raise DSLError(
+                    UNKNOWNBACKDROP_MESSAGE.format(name=value),
+                    line=line,
+                    hint=self._known_hint("Stage backdrops", known, value),
+                )
 
     # -- decorated defs --------------------------------------------------
 
@@ -617,6 +902,14 @@ class _Transpiler:
                 f'{name}() needs target="SpriteName".', line=line
             )
         target = self._decorator_string(name, "target", target_node)
+        if target.casefold() == "stage":
+            target = "Stage"
+        elif self.context is not None and target not in self.sprite_names:
+            raise DSLError(
+                TARGET_MESSAGE.format(op=f"@{name}()", name=target),
+                line=_line(target_node),
+                hint=self._target_hint(target),
+            )
         label = def_name
         if "label" in raw:
             label = self._decorator_string(name, "label", raw["label"])
@@ -1347,6 +1640,8 @@ class _Transpiler:
                     raise DSLError(
                         "list index must be at least 1.", line=_line(node)
                     )
+            if isinstance(value, str):
+                self._check_command_name(op, spec.name, value, _line(node))
             return value
         return self._expr(node)
 

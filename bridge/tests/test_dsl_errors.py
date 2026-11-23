@@ -38,7 +38,7 @@ def assert_diagnostic(
 
 def body(source_text: str) -> str:
     return (
-        '@on_flag(target="S")\n'
+        '@on_flag(target="Sprite1")\n'
         "def f():\n"
         + textwrap.indent(textwrap.dedent(source_text).strip("\n"), "    ")
         + "\n"

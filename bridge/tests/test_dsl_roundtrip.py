@@ -72,17 +72,13 @@ def _context_for(payload: dict) -> ProjectContext:
             name = change.get("name")
             if isinstance(name, str):
                 sprites.add(name)
-        if action in {"add_script", "replace_script"}:
-            target = change.get("target")
-            if isinstance(target, str):
-                sprites.add(target)
         if action == "create_variable":
             name = change.get("name")
             if isinstance(name, str):
                 variables.add(name)
-            target = change.get("target")
-            if isinstance(target, str):
-                sprites.add(target)
+        target = change.get("target")
+        if isinstance(target, str):
+            sprites.add(target)
         for block in change.get("body", []) or []:
             _add_block(block, sprites, variables)
     sprites.discard("Stage")

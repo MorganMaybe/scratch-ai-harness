@@ -100,7 +100,7 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   predecessor built, so `load_sprite`/`replace_script` are exercised),
   `manifest.json`/`summary.json` with a mechanical `flip_verdict`, and a
   per-scenario human rubric. Offline wiring test included; the suite is
-  **586 passed, 2 skipped** (553 + 9 pack-dialect + 24 lint tests).
+  **617 passed, 2 skipped** (584 + 9 pack-dialect + 24 lint tests).
 - **Advisory runtime lints** (`harness/lints.py`): deterministic, no model
   calls, warnings only. Flags a `forever`/`repeat_until` whose direct body
   moves the sprite with no `wait` anywhere in its subtree (drift), an
@@ -111,6 +111,18 @@ folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
   finite pen `repeat`, `switch_costume`) are deliberate exclusions. Warnings
   ride the `#result` chat lines as `warning: ...` and land in `lints.json`
   in full audit bundles; they never feed a repair.
+- **Parse-time context and media gates** (`harness/dsl/parse.py`, 31 tests in
+  `test_dsl_gates.py`): unknown script targets (`@on_flag(target="Ground")`),
+  missing/unknown sprite targets on `create_variable`/`create_list` sprite
+  scope, `duplicate_sprite`, `delete_sprite`, `set_sprite` and `add_costume`,
+  unknown costume/sound/backdrop names in
+  `switch_costume`/`play_sound`/`switch_backdrop`, and unresolvable library
+  paths or sprite presets now fail during `transpile`/`lint` with line-precise
+  diagnostics and did-you-mean hints instead of costing a model round trip in
+  `validate_changeset`. The gates are order-aware (a sprite or costume added
+  earlier in the module counts), skip cleanly without a context or an installed
+  media tree, and leave the validator as defense in depth; the JSON path is
+  untouched.
 
 **Still weak — the honest part:** syntax reliability and token efficiency
 are solved; **output quality is not**. Semantic quality of larger scenes
