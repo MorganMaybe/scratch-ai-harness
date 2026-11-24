@@ -416,6 +416,8 @@ class TurnAudit:
         echo_sprites: list[str] | None = None,
         noop_guard: bool = False,
         noop_sprites: list[str] | None = None,
+        envelope_actions: list[str] | None = None,
+        envelope_fatal: bool = False,
     ) -> None:
         if not self.full:
             return
@@ -443,6 +445,18 @@ class TurnAudit:
             # guard round naming the two legitimate ways forward.
             meta["noop_guard"] = True
             meta["noop_sprites"] = list(noop_sprites or [])
+        if envelope_actions is not None:
+            # The reply-envelope layer recovered this reply's shape (prose
+            # around the fence, notes after the close, a missing close, ...).
+            # Recoveries cost zero repairs, so the audit keeps them visible
+            # for drift measurement instead of hiding them in a warning line.
+            actions = [str(action) for action in envelope_actions]
+            meta["envelope_actions"] = actions
+            meta["envelope_action_count"] = len(actions)
+        if envelope_fatal:
+            # A fatal envelope diagnostic was this attempt's failure (two
+            # fenced blocks, code outside the fence, a prose-only reply).
+            meta["envelope_fatal"] = True
         if user_prompt is not None:
             self._write(
                 f"prompts/user-{attempt:02d}.txt", user_prompt, full_only=True

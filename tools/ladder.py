@@ -47,6 +47,7 @@ from harness.agent import Agent, _hat_name  # noqa: E402
 from harness.audit import AuditSettings, AuditStore  # noqa: E402
 from harness.config import resolve_config  # noqa: E402
 from harness.context import ProjectContext, ScriptSummary, SpriteContext  # noqa: E402
+from harness.history import ConversationHistory  # noqa: E402
 from harness.llm import draw_square_response  # noqa: E402
 from harness.providers.base import (  # noqa: E402
     ModelReply,
@@ -108,6 +109,11 @@ SCENARIOS: dict[str, tuple[Step, ...]] = {
         Step(
             "revision",
             "Make the player jump higher and run faster.",
+        ),
+        Step(
+            "start_lower",
+            "Now make the platforms start lower, and make the player a "
+            "little smaller.",
         ),
     ),
     "calculator": (
@@ -380,8 +386,14 @@ def run_step(
     mode: str,
     context: ProjectContext,
     turn_budget_s: float,
+    history: ConversationHistory | None = None,
 ) -> tuple[dict[str, Any], Any]:
-    """Run one turn, write its audit bundle, return the record and result."""
+    """Run one turn, write its audit bundle, return the record and result.
+
+    ``history`` is the scenario chain's shared store.  The agent reads it when
+    it builds the prompt; the runner appends the turn at the same success point
+    the server's ``#applied`` acknowledgement uses (a turn that applied).
+    """
     os.environ["HARNESS_GENERATOR"] = mode
     request_id = f"{step.name}-{mode}-r{run}"
     audit = store.start_turn(
@@ -396,7 +408,7 @@ def run_step(
         context_literal=None,
         generator=mode,
     )
-    agent = Agent(provider, context, audit=audit)
+    agent = Agent(provider, context, audit=audit, history=history)
     started = time.monotonic()
     outcome = "error:internal"
     error_text = ""
@@ -412,6 +424,8 @@ def run_step(
         outcome = "ok"
         attempts = result.attempts
         changes = len(result.compiled.changes)
+        if history is not None:
+            history.record_result(step.prompt, result)
     except ValidationError as exc:
         outcome = "error:validation"
         attempts = exc.attempts or 0
@@ -438,6 +452,7 @@ def run_step(
         "step": step.name,
         "run": run,
         "mode": mode,
+        "history": history is not None,
         "request_id": request_id,
         "dir": audit.root.name if audit is not None else "",
         "outcome": outcome,
@@ -669,6 +684,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="canned replies through a stub provider; no network or key",
     )
+    parser.add_argument(
+        "-History",
+        "--history",
+        choices=("on", "off"),
+        default="on",
+        help="carry conversation history across a scenario's steps "
+        "(default: on; run both for the A/B)",
+    )
     args = parser.parse_args(argv)
 
     if args.runs < 1:
@@ -726,10 +749,12 @@ def main(argv: list[str] | None = None) -> int:
     total_turns = args.runs * len(modes) * sum(
         len(steps) for steps in scenarios.values()
     )
+    history_on = args.history == "on"
     print(f"ladder audit dir: {audit_dir}")
     print(
         f"runs={args.runs} modes={','.join(modes)} "
-        f"scenarios={','.join(scenarios)} turns={total_turns}"
+        f"scenarios={','.join(scenarios)} turns={total_turns} "
+        f"history={args.history}"
     )
     if not args.dry_run:
         estimate = total_turns * 20
@@ -746,6 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         "modes": modes,
         "scenarios": list(scenarios),
         "turn_budget_s": args.turn_budget,
+        "history": history_on,
         "profile": meta.profile,
         "model": meta.model,
         "base_url": meta.base_url,
@@ -768,6 +794,7 @@ def main(argv: list[str] | None = None) -> int:
             for mode in modes:
                 for scenario, steps in scenarios.items():
                     context = clean_context()
+                    history = ConversationHistory() if history_on else None
                     failed_step: str | None = None
                     for step in steps:
                         if failed_step is not None:
@@ -787,6 +814,7 @@ def main(argv: list[str] | None = None) -> int:
                             mode,
                             context,
                             args.turn_budget,
+                            history,
                         )
                         records.append(record)
                         _save_progress()

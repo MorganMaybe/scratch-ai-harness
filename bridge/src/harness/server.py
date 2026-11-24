@@ -21,9 +21,11 @@ from .config import (
     ModelConfig,
     resolve_config,
     resolve_generator,
+    resolve_history,
     with_overrides,
 )
 from .context import ProjectContext
+from .history import ConversationHistory
 from .llm import DelayedLLM
 from .obs import bridge_info, bridge_options, bridge_usage, setup_logging
 from .providers.base import ProviderError
@@ -61,9 +63,11 @@ class Bridge:
     ``llm``/provider is shared between requests.
 
     ``pending`` exists solely to acknowledge a change set.  It maps a request id
-    to ``(AgentResult, created_monotonic)``; entries older than
+    to ``(AgentResult, created_monotonic, request_text)``; entries older than
     ``pending_ttl_s`` are swept when the next message is handled, and an
     ``#applied`` for an unknown/expired id is still acknowledged with ``#ok``.
+    The stored request text lets ``#applied`` append the turn to the conversation
+    history without re-reading the wire.
 
     ``max_concurrent`` bounds simultaneous agent turns with a
     ``threading.BoundedSemaphore`` because ``handle`` runs in a worker thread
@@ -120,12 +124,25 @@ class Bridge:
     usage_requests: int = 0
     #: Model actually used by the last completed turn ("" before the first).
     last_model: str = ""
+    #: Bounded, process-local conversation memory.  One bridge serves one image
+    #: session and the wire carries no session id, so process lifetime is the
+    #: honest v1 scope.  ``__post_init__`` creates one unless a caller supplies
+    #: a store (tests, the ladder runner).
+    history: ConversationHistory | None = None
+    #: ``HARNESS_HISTORY`` / ``[harness] history``; ``None`` resolves it once at
+    #: construction.  False records nothing and renders no section, leaving
+    #: prompts byte-identical to the pre-history bridge.
+    history_enabled: bool | None = None
 
     def __post_init__(self) -> None:
         if self.pending is None:
             self.pending = {}
         if self.max_concurrent < 1:
             raise ValueError("max_concurrent must be at least 1")
+        if self.history is None:
+            self.history = ConversationHistory()
+        if self.history_enabled is None:
+            self.history_enabled = resolve_history()
         self._semaphore = threading.BoundedSemaphore(self.max_concurrent)
         self._state_lock = threading.Lock()
         # Guards ``_active``; a separate lock keeps cancellation from waiting
@@ -327,7 +344,7 @@ class Bridge:
         with self._state_lock:
             expired = [
                 request_id
-                for request_id, (_, created) in pending.items()
+                for request_id, (_, created, _request) in pending.items()
                 if current - created > self.pending_ttl_s
             ]
             for request_id in expired:
@@ -339,6 +356,14 @@ class Bridge:
         assert pending is not None
         with self._state_lock:
             entry = pending.pop(request_id, None)
+            # Ack-gated recording: only a result the image confirmed applied
+            # enters history.  Failed turns never reach ``#applied``.
+            if entry is not None and self.history_enabled and self.history is not None:
+                result, _created, request = entry
+                try:
+                    self.history.record_result(request, result)
+                except Exception:  # a history bug must never break an ack
+                    log.warning("event=history.record_failed", exc_info=True)
         return entry[0] if entry is not None else None
 
     def _register_applied(self, result: AgentResult) -> None:
@@ -396,8 +421,9 @@ class Bridge:
                 generator=resolve_generator(),
             )
 
-        # Fresh agent per request: only the provider is shared.  A request can
-        # therefore never mutate another request's context or registry.
+        # Fresh agent per request: only the provider and the conversation store
+        # are shared.  A request can therefore never mutate another request's
+        # context or registry.
         token = CancelToken()
         agent = Agent(
             self.agent.llm,
@@ -405,6 +431,7 @@ class Bridge:
             registry=registry,
             cancel_token=token,
             audit=audit,
+            history=self.history if self.history_enabled else None,
         )
         started = self.clock()
         # The deadline must use the real monotonic clock, not the injectable
@@ -434,8 +461,9 @@ class Bridge:
                 attempts = exc.attempts or 0
                 # The wire is a Smalltalk literal array: a newline cannot be
                 # encoded and would disconnect the image instead of reporting
-                # the issues.  Keep every issue, joined on one line.
-                detail = "; ".join(str(issue) for issue in exc.issues) or "invalid change set"
+                # the issues.  Collapse each issue (diagnostics can carry a
+                # quoted source line) and keep every issue, joined on one line.
+                detail = _validation_detail(exc.issues)
                 error_text = detail
                 self._note_error("validation", detail)
                 return [[Sym("error"), request_id, detail]]
@@ -465,7 +493,7 @@ class Bridge:
             pending = self.pending
             assert pending is not None
             with self._state_lock:
-                pending[request_id] = (result, self.clock())
+                pending[request_id] = (result, self.clock(), prompt)
                 self.last_error = ""
                 self._record_usage(result)
             outcome = "ok"
@@ -521,6 +549,17 @@ def _apply_provider_config(provider: Any, config: ModelConfig) -> bool:
             updated = True
         provider = getattr(provider, "inner", None)
     return updated
+
+
+def _validation_detail(issues: list[Any]) -> str:
+    """One wire-safe line for a validation failure.
+
+    Diagnostics may carry a quoted source line and a hint on the next line; a
+    newline cannot be encoded in a Smalltalk literal, so collapse whitespace
+    rather than lose the whole reply.
+    """
+    text = "; ".join(" ".join(str(issue).split()) for issue in issues)
+    return text or "invalid change set"
 
 
 def _join_lines(value: Any) -> str:

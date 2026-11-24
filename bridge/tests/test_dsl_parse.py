@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
+
 from harness.context import ProjectContext, SpriteContext
-from harness.dsl import api_reference, lint, transpile
+from harness.dsl import DSLErrors, api_reference, lint, transpile
 from harness.dsl.vocab import CALLABLE_SPECS
 from harness.validator import validate_changeset
 
@@ -641,6 +643,46 @@ def test_negative_number_literals_are_literals_not_unary_blocks():
     body = transpile(text).changes[0].body
     assert body[0].to_dict() == {"op": "move", "args": {"steps": -10}}
     assert body[1].args["degrees"].args["from"] == -20
+
+
+def test_numeric_menus_accept_the_index_but_string_menus_do_not():
+    text = source(
+        """
+        @on_flag(target="S")
+        def f():
+            play_drum(1, 0.1)
+            set_instrument(5)
+            play_drum("1 (Snare Drum)", 0.1)
+        """
+    )
+
+    body = transpile(text).changes[0].body
+    assert body[0].to_dict() == {
+        "op": "play_drum",
+        "args": {"drum": 1, "beats": 0.1},
+    }
+    assert body[1].to_dict() == {
+        "op": "set_instrument",
+        "args": {"instrument": 5},
+    }
+    assert body[2].to_dict() == {
+        "op": "play_drum",
+        "args": {"drum": "1 (Snare Drum)", "beats": 0.1},
+    }
+
+
+def test_numeric_menu_request_rejects_out_of_range_and_string_only_menus():
+    cases = (
+        "    play_drum(19, 0.1)",
+        '    play_drum("19 (Snare Drum)", 0.1)',
+        "    if key_pressed(1):\n        move(1)",
+    )
+    for body in cases:
+        with pytest.raises(DSLErrors) as caught:
+            transpile(f'@on_flag(target="S")\ndef f():\n{body}\n')
+        assert any(
+            "must be one of" in error.format() for error in caught.value.errors
+        ), [error.format() for error in caught.value.errors]
 
 
 def test_api_reference_is_generated_from_the_catalog():

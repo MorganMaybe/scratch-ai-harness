@@ -54,9 +54,11 @@ def test_dry_run_ladder_writes_bundles_and_summary(tmp_path, monkeypatch):
     assert manifest["dry_run"] is True
     assert manifest["runs"] == 1
     assert manifest["modes"] == ["json", "dsl"]
+    assert manifest["history"] is True
     turns = manifest["turns"]
     assert len(turns) == 4  # 2 steps x 2 modes x 1 run
     assert all(turn["outcome"] == "ok" for turn in turns)
+    assert all(turn["history"] is True for turn in turns)
     assert {turn["mode"] for turn in turns} == {"json", "dsl"}
 
     # Every turn wrote a full audit bundle tagged with its generator.
@@ -82,6 +84,11 @@ def test_dry_run_ladder_writes_bundles_and_summary(tmp_path, monkeypatch):
     user_prompt = (bundle / "prompts" / "user-01.txt").read_text(encoding="utf-8")
     assert "ai-1" in user_prompt
     assert "draw_square" in user_prompt
+    # The chained step also sees the previous turn's conversation: the square
+    # request and its applied summary are in the history section.
+    assert "Conversation so far" in user_prompt
+    assert "Make the cat draw a square" in user_prompt
+    assert "Assistant: Added a green-flag square-drawing script." in user_prompt
     system_prompt = (bundle / "prompts" / "system.txt").read_text(encoding="utf-8")
     # The appendix shows a generic example; the live index line names the
     # actual sprite and script ids for this project.
@@ -100,6 +107,34 @@ def test_dry_run_ladder_writes_bundles_and_summary(tmp_path, monkeypatch):
     assert verdict["json"]["ok"] == 2
     assert verdict["dsl"]["ok"] == 2
     assert verdict["dsl"]["bad_json_outcomes"] == 0
+
+
+def test_dry_run_ladder_history_off_leaves_prompts_stateless(tmp_path, monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "json")
+    ladder = _load_ladder()
+    audit_dir = tmp_path / "ladder-off"
+
+    code = ladder.main(
+        [
+            "--dry-run",
+            "-Runs",
+            "1",
+            "-Scenarios",
+            "square_chain",
+            "-AuditDir",
+            str(audit_dir),
+            "-History",
+            "off",
+        ]
+    )
+
+    assert code == 0
+    manifest = json.loads((audit_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["history"] is False
+    assert all(turn["history"] is False for turn in manifest["turns"])
+    for turn in manifest["turns"]:
+        prompt = audit_dir / turn["dir"] / "prompts" / "user-01.txt"
+        assert "Conversation so far" not in prompt.read_text(encoding="utf-8")
 
 
 def test_unknown_scenario_and_mode_are_rejected(tmp_path):

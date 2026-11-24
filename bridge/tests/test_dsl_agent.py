@@ -155,6 +155,84 @@ def bad_costume():
     assert '"changes"' not in repair
 
 
+def test_dsl_ambiguous_plus_repair_quotes_the_line_and_the_rule(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    bad_plus = '''create_variable("first", scope="global", initial=0)
+create_variable("last", scope="global", initial=0)
+
+@on_flag(target="Sprite1", label="show_sum")
+def show_sum():
+    say(first + last)
+'''
+    provider = _Replies([_raw(bad_plus), _raw(SQUARE_DSL)])
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=1)
+    result = agent.handle("Show the sum.", request_id=38)
+
+    assert result.attempts == 2
+    repair = provider.requests[1].user
+    # The diagnostic now quotes the exact source line, not just its number.
+    assert "line 6: say(first + last)" in repair
+    assert "'+' between two computed values is ambiguous" in repair
+    assert "rewrite `a + b` as `add(a, b)`" in repair
+    assert "Do not leave a flagged line unchanged." in repair
+    assert "corrected module" in repair
+
+
+def test_dsl_menu_repair_quotes_the_line_and_names_the_value_rule(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    bad_menu = '''@on_flag(target="Sprite1", label="bad_style")
+def bad_style():
+    set_rotation_style("sideways")
+'''
+    provider = _Replies([_raw(bad_menu), _raw(SQUARE_DSL)])
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=1)
+    result = agent.handle("Set the style.", request_id=39)
+
+    assert result.attempts == 2
+    repair = provider.requests[1].user
+    assert 'line 3: set_rotation_style("sideways")' in repair
+    assert "must be one of" in repair
+    assert "Menu arguments take the exact listed value" in repair
+    assert "set_instrument(5)" in repair
+
+
+def test_dsl_duplicate_name_repair_explains_reuse(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    bad = '''create_variable("score", scope="global", initial=0)
+create_variable("score", scope="global", initial=0)
+
+@on_flag(target="Sprite1", label="show_score")
+def show_score():
+    say(score)
+'''
+    provider = _Replies([_raw(bad), _raw(SQUARE_DSL)])
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=1)
+    result = agent.handle("Show the score.", request_id=40)
+
+    assert result.attempts == 2
+    repair = provider.requests[1].user
+    assert "line 2: create_variable(\"score\"" in repair
+    assert "variable 'score' already exists; reuse it" in repair
+    assert "Remove the flagged create_variable/create_list line" in repair
+
+
+def test_dsl_existing_sprite_repair_explains_set_sprite(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    bad = 'create_sprite("Sprite1", costumes=["Animals/bat1-a.png"])'
+    provider = _Replies([_raw(bad), _raw(SQUARE_DSL)])
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=1)
+    result = agent.handle("Add a second cat.", request_id=41)
+
+    assert result.attempts == 2
+    repair = provider.requests[1].user
+    assert "sprite 'Sprite1' already exists" in repair
+    assert "Use set_sprite() to change it" in repair
+
+
 def test_dsl_repairs_exhausted_to_validation_error(monkeypatch):
     monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
     bad = "import os\n"
@@ -168,6 +246,98 @@ def test_dsl_repairs_exhausted_to_validation_error(monkeypatch):
     assert caught.value.attempts == 2
 
 
+UNKNOWN_CLONE_DSL = '''@on_flag(target="Sprite1", label="spawn")
+def spawn():
+    create_clone("Ghost")
+'''
+
+
+def test_dsl_parse_repairs_reserve_one_extra_for_validation(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    # Two parse failures spend the whole max_repairs=2 budget, then a parse-clean
+    # module fails validation.  That validation failure earns one extra repair.
+    provider = _Replies(
+        [
+            _raw("import os\n"),
+            _raw("import sys\n"),
+            _raw(UNKNOWN_CLONE_DSL),
+            _raw(SQUARE_DSL),
+        ]
+    )
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=2)
+    result = agent.handle("Spawn ghosts.", request_id=42)
+
+    assert result.attempts == 4
+    assert result.compiled.changes[0].label == "draw_square"
+    assert len(provider.requests) == 4
+
+
+def test_dsl_extra_validation_repair_prompt_quotes_the_change_set(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    provider = _Replies(
+        [
+            _raw("import os\n"),
+            _raw("import sys\n"),
+            _raw(UNKNOWN_CLONE_DSL),
+            _raw(SQUARE_DSL),
+        ]
+    )
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=2)
+    agent.handle("Spawn ghosts.", request_id=43)
+
+    repair = provider.requests[3].user
+    assert "Your previous Scratch-Python module could not be used." in repair
+    assert "unknown clone target 'Ghost'" in repair
+    assert 'create_clone("Ghost")' in repair
+    assert "Previous module:" in repair
+    assert "corrected module" in repair
+
+
+def test_dsl_extra_validation_repair_is_granted_only_once(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    # After the extra repair also fails validation, the turn stops instead of
+    # granting a second extra.
+    provider = _Replies(
+        [
+            _raw("import os\n"),
+            _raw("import sys\n"),
+            _raw(UNKNOWN_CLONE_DSL),
+            _raw(UNKNOWN_CLONE_DSL),
+        ]
+    )
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=2)
+    with pytest.raises(ValidationError) as caught:
+        agent.handle("Spawn ghosts.", request_id=44)
+
+    assert caught.value.attempts == 4
+    assert len(provider.requests) == 4
+    assert any(
+        "unknown clone target 'Ghost'" in str(issue)
+        for issue in caught.value.issues
+    )
+
+
+def test_dsl_validation_only_repairs_keep_the_normal_cap(monkeypatch):
+    monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
+    # Every repair so far is a validation repair, so max_repairs=1 still means
+    # two attempts and no extra.
+    provider = _Replies([_raw(UNKNOWN_CLONE_DSL), _raw(UNKNOWN_CLONE_DSL)])
+
+    agent = Agent(provider, ProjectContext.demo(), max_repairs=1)
+    with pytest.raises(ValidationError) as caught:
+        agent.handle("Spawn ghosts.", request_id=45)
+
+    assert caught.value.attempts == 2
+    assert len(provider.requests) == 2
+    assert any(
+        "unknown clone target 'Ghost'" in str(issue)
+        for issue in caught.value.issues
+    )
+
+
 def test_dsl_mode_does_not_fragment_repair(monkeypatch):
     monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
     provider = _Replies([_raw("this is not python at all\n", model="fake"), _raw(SQUARE_DSL)])
@@ -176,6 +346,8 @@ def test_dsl_mode_does_not_fragment_repair(monkeypatch):
     agent.handle("Draw a square.", request_id=37)
 
     # A DSL rejection must ask for the whole module, never the JSON fragment
-    # shape used for one or two bad JSON changes.
-    assert "Python syntax error" in provider.requests[1].user
+    # shape used for one or two bad JSON changes.  The envelope layer turns
+    # unparsable prose into its own diagnostic instead of a Python syntax
+    # error, so pin the reply-shape message here.
+    assert "reply envelope: the reply contains no module" in provider.requests[1].user
     assert "corrected module" in provider.requests[1].user

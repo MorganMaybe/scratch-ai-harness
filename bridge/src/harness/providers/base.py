@@ -116,6 +116,11 @@ class ModelRequest:
     #: What the caller expects back: ``json`` (the change-set object) or
     #: ``dsl`` (one Scratch-Python module in ``ModelReply.raw_text``).
     reply_format: str = "json"
+    #: The DSL stop sequence - a newline plus the closing-fence marker -
+    #: requested so nothing can follow the module's closing fence.  Plumbed
+    #: but OFF until a live ladder A/B shows the provider honours it without
+    #: hurting prompt caching; the provider derives it when the flag is on.
+    stop: tuple[str, ...] | None = None
 
 
 @dataclass

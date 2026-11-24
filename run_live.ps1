@@ -8,12 +8,17 @@
 #   .\run_live.ps1 -Audit full          # local prompt/model debugging
 #   .\run_live.ps1 -Reuse               # attach to an existing bridge
 #   .\run_live.ps1 -Generator dsl       # model writes Scratch-Python (json|dsl)
+#   .\run_live.ps1 -History off         # disable conversation history
+#   .\run_live.ps1 -StopSequence on     # DSL stop sequence (on|off; default off)
 param(
     [switch]$DebugLog,
     [switch]$Reuse,
     [string]$LogFile,
     [string]$Profile = "opencode-go",
     [string]$Generator = "",
+    [ValidateSet("", "on", "off")]
+    [string]$History = "",
+    [string]$StopSequence = "",
     [int]$PromptBudget = 80000,
     [ValidateSet("off", "meta", "full")]
     [string]$Audit = "off",
@@ -57,6 +62,12 @@ if ($listener) {
         if ($Audit -ne "off") {
             Write-Host "note: -Audit only applies to a newly launched bridge; restart to change it."
         }
+        if ($History) {
+            Write-Host "note: -History only applies to a newly launched bridge; restart to change it."
+        }
+        if ($StopSequence) {
+            Write-Host "note: -StopSequence only applies to a newly launched bridge; restart to change it."
+        }
         exit 0
     }
     throw "port 8765 is already in use: $what`nStop that bridge first, or re-run with -Reuse to use it as-is."
@@ -80,11 +91,23 @@ $env:PYTHONPATH = Join-Path $bridge "src"
 if ($Generator) {
     $env:HARNESS_GENERATOR = $Generator
 }
+if ($History) {
+    $env:HARNESS_HISTORY = $History
+}
+if ($StopSequence) {
+    $env:HARNESS_STOP_SEQUENCE = $StopSequence
+}
 Set-Location $bridge
 
 Write-Host "bridge profile: $Profile (key loaded, not shown)"
 if ($Generator) {
     Write-Host "reply generator: $Generator"
+}
+if ($History) {
+    Write-Host "conversation history: $History"
+}
+if ($StopSequence) {
+    Write-Host "stop sequence: $StopSequence"
 }
 Write-Host "bridge log: $LogFile"
 if ($Audit -ne "off") {

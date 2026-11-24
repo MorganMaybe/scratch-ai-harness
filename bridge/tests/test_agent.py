@@ -220,6 +220,39 @@ def test_agent_fails_after_repairs():
         agent.handle("Draw a square.", 1)
 
 
+def test_agent_parse_repairs_reserve_one_extra_for_validation():
+    context = ProjectContext.demo()
+    missing_summary = {"summary": "", "changes": []}
+    # Four targetless add_script changes exceed the fragment-repair limit, so
+    # this validator failure stays a full change-set repair.
+    invalid = {
+        "summary": "Bad scripts.",
+        "changes": [
+            {
+                "action": "add_script",
+                "label": f"bad_{index}",
+                "hat": {"op": "when_flag_clicked"},
+                "body": [],
+            }
+            for index in range(4)
+        ],
+    }
+    provider = MockLLM(
+        [missing_summary, missing_summary, invalid, draw_square_response()]
+    )
+    agent = Agent(provider, context, max_repairs=2)
+
+    result = agent.handle("Draw a square.", 1)
+
+    # Two parse failures spend the budget, then the validation failure earns
+    # the one extra repair and the fourth attempt succeeds.
+    assert result.attempts == 4
+    assert result.compiled.changes[0].script_id == "ai-1"
+    repair = provider.calls[3][1]
+    assert "add_script requires a target" in repair
+    assert "Previous response:" in repair
+
+
 class _BadJsonThenGood:
     name = "fake"
 

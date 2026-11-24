@@ -9,6 +9,7 @@ from harness.config import (
     default_config_path,
     read_ini,
     resolve_config,
+    resolve_stop_sequence,
 )
 
 
@@ -157,3 +158,57 @@ def test_model_config_is_frozen():
     config = ModelConfig(profile="p", base_url="u", model="m")
     with pytest.raises(Exception):
         config.model = "other"  # type: ignore[misc]
+
+
+# --- stop sequence switch (mirrors the resolve_history tests) ---------------
+
+
+def test_resolve_stop_sequence_defaults_off(tmp_path):
+    assert resolve_stop_sequence(tmp_path / "missing.ini", env={}) is False
+
+
+def test_resolve_stop_sequence_reads_the_harness_section(tmp_path):
+    path = tmp_path / "harness.ini"
+    path.write_text("[harness]\nstop_sequence=on\n", encoding="utf-8")
+    assert resolve_stop_sequence(path, env={}) is True
+
+
+def test_resolve_stop_sequence_env_wins_over_ini(tmp_path):
+    path = tmp_path / "harness.ini"
+    path.write_text("[harness]\nstop_sequence=on\n", encoding="utf-8")
+    assert resolve_stop_sequence(path, env={"HARNESS_STOP_SEQUENCE": "off"}) is False
+    assert resolve_stop_sequence(path, env={"HARNESS_STOP_SEQUENCE": " ON "}) is True
+    # Blank env falls through to the file.
+    assert resolve_stop_sequence(path, env={"HARNESS_STOP_SEQUENCE": "  "}) is True
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("on", True),
+        ("true", True),
+        ("TRUE", True),
+        ("1", True),
+        ("off", False),
+        ("false", False),
+        ("FALSE", False),
+        ("0", False),
+    ],
+)
+def test_resolve_stop_sequence_accepts_on_off_spellings(tmp_path, value, expected):
+    assert resolve_stop_sequence(
+        tmp_path / "missing.ini", env={"HARNESS_STOP_SEQUENCE": value}
+    ) is expected
+
+
+@pytest.mark.parametrize("value", ["yes", "no", "sometimes", "2"])
+def test_resolve_stop_sequence_rejects_unknown_values(tmp_path, value):
+    with pytest.raises(ConfigError) as excinfo:
+        resolve_stop_sequence(
+            tmp_path / "missing.ini", env={"HARNESS_STOP_SEQUENCE": value}
+        )
+    assert "stop_sequence must be one of" in str(excinfo.value)
+    path = tmp_path / "harness.ini"
+    path.write_text(f"[harness]\nstop_sequence={value}\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        resolve_stop_sequence(path, env={})

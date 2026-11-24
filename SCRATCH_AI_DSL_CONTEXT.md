@@ -173,6 +173,23 @@ Return **one** fenced `python` block and nothing else. No prose before or after
 it. The module inside the fence is the whole change set.
 If the request is already satisfied, return `summary(...)` with `notes(...)` and no defs — the bridge treats it as an acknowledgment and nothing is applied.
 
+### Exact reply shape
+
+```python
+summary("Moved the crab left.")
+set_sprite("Crab1", x=-100)
+
+@on_flag(target="Crab1")
+def patrol():
+    move(5)
+```
+
+- Everything goes between the two fences: no "Here is the module:" before the
+  opening fence, no commentary after the closing fence.
+- `summary()` and `notes()` go INSIDE the fence, at module level.
+- Exactly ONE fenced block. A second block is an error, even an identical copy.
+- A JSON control message is the JSON object alone: no fence, no prose.
+
 **Control-channel replies stay JSON.** When you need more context, return only
 one of the small JSON objects from the preamble (not a python fence). Do not
 combine them with a module; the bridge detects the shape first and resends the
@@ -295,7 +312,8 @@ annotations. A plain or nested def, or two decorators, is rejected.
   `set_x(x_position() + 5)`, `say("Score: " + score)`.
 - `+` between two computed values is ambiguous and rejected. Write `join(a, b)`
   for text or `add(a, b)` for numbers. One literal disambiguates: `a + 1` is
-  numeric; `"Score: " + score` is a join.
+  numeric; `"Score: " + score` is a join. The transpiler never inspects the
+  project to guess a variable's type, so mark every non-literal case yourself.
 - `==`/`!=` compare as Scratch `equals`. Division is Scratch division; `//` is
   not supported.
 
@@ -316,7 +334,7 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `None` | No null value. Omit the optional argument or use `0` / `""`. | rejection naming the construct |
 | `**` and `//` | No power or floor-division block. Use `multiply`/`divide` or a repeat loop. | rejection naming the operator |
 | keyword args named like Python keywords | `random(from=1, to=10)` cannot parse. Call `random(1, 10)`. | Python syntax error on that line |
-| `+` between two computed values | Ambiguous. Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch; write join(a, b) to build text or add(a, b) to add numbers.` |
+| `+` between two computed values | Ambiguous. Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.` |
 | `range(a, b)` | Not supported yet. Write `for _ in range(b - a):`. | `line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.` |
 
 Also rejected: using a command as a value (`set_x(move(10))`), calling an
@@ -456,6 +474,8 @@ bullet/particle/tile patterns. The catalog already lists
 - `play_sound_until_done(sound)` waits; `stop_all_sounds()` stops everything.
 - `play_note(note, beats)` takes note `0..127` and beats;
   `play_drum(drum, beats)`; `rest(beats)`; `set_instrument(instrument)`.
+  Drum and instrument menus accept their integer index (drums `1..18`,
+  instruments `1..128`) as well as the exact menu string.
 - `set_volume(percent)` / `change_volume(delta)`; `volume()`.
   `set_tempo(bpm)` / `change_tempo(delta)`; `tempo()`.
 
@@ -751,7 +771,11 @@ Before returning the module, check:
 - [ ] Stage defs use no motion, say/think, size, show/hide, or sprite-only
       sensing.
 - [ ] Every variable is created or known from the context, and no script reads
-      another sprite's local variable.
+      another sprite's local variable. Create each name once: a name already in
+      the context or created earlier in the module is reused, never re-created.
+- [ ] Every `+` with two non-literal operands is marked as `add(a, b)` or
+      `join(a, b)`; the transpiler does not infer a variable's type from the
+      project.
 - [ ] Every `while True:` loop contains a pacing `wait(0.2)`-style call.
 - [ ] Colors are `#rrggbb` literals; menu values are exact; library paths are
       exact media-index paths with costume names from the file stem.
@@ -779,7 +803,7 @@ line {n}: {op}() is a reporter; it cannot stand alone - assign it to a variable 
 line {n}: unknown variable '{name}'; create it first with create_variable("{name}", ...) or use a name from the project context.
 line {n}: '{name}' is a local variable of sprite '{owner}'; another sprite cannot read it - use attribute_of/set_attribute_of or broadcast to a script owned by {owner}.
 line {n}: Scratch has no unary minus; write 0 - x.
-line {n}: '+' between two computed values is ambiguous in Scratch; write join(a, b) to build text or add(a, b) to add numbers.
+line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.
 line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.
 line {n}: a script def needs exactly one event decorator, for example @on_flag(target="Sprite1").
 ```
@@ -794,13 +818,16 @@ What each means:
   `set_attribute_of`/`change_attribute_of`, or broadcast to that sprite.
 - **unary minus** - write `0 - x`. Module args cannot hold `0 - 20`; use `270`
   for left and put negative coordinates in a script.
+- **duplicate or reserved name** - reuse an existing variable/list; a sprite
+  cannot be named `Stage`, `edge` or `mouse-pointer`.
 - **ambiguous `+`** - write `join(a, b)` or `add(a, b)`.
 - **range(a, b)** - write `for _ in range(b - a):`.
 - **decorator** - every def needs exactly one; a nested/undecorated def should
   become its own script started by `broadcast` + `@on_receive`.
 
 Fix only the quoted lines; do not rewrite the whole module unless several
-scripts failed. Keep valid defs and module calls unchanged.
+scripts failed. Keep the other defs and module calls unchanged, and keep the
+section 5 reply shape: one fenced python block, nothing before or after it.
 
 After a module transpiles, the validator still runs. Its messages use the same
 wording as the JSON contract (`unknown target`, `unknown costume`,

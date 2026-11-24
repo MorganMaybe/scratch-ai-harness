@@ -1,15 +1,17 @@
 # Scratch AI Harness: handoff
 
-**Date:** 2026-11-22
-**Status:** release image verified. The 407 offline tests pass on a fresh clone.
+**Date:** 2026-11-24
+**Status:** the `pydsl` work is merged into `main`: Scratch-Python front end,
+conversation memory and the reply-envelope layer all landed. 852 offline tests
+pass on a fresh clone (854 with the local audit corpus).
 **Repo:** https://github.com/MorganMaybe/scratch-ai-harness, a fork of
 [`scratchfoundation/Scratch_1.4`](https://github.com/scratchfoundation/Scratch_1.4).
 **Start here:** [`README.md`](README.md) and [`QUICKSTART.md`](QUICKSTART.md).
 
 This is the current state of the project: what works, what doesn't, and how to
-pick it up. The long session-by-session history lives in
-[`docs/HANDOFF-2026-11-15.md`](docs/HANDOFF-2026-11-15.md), and I've left it
-alone on purpose.
+pick it up. The session-by-session record lives in
+[`docs/HISTORY.md`](docs/HISTORY.md) (sessions 1–24); the session-22 raw
+detail is in [`docs/HANDOFF-2026-11-15.md`](docs/HANDOFF-2026-11-15.md).
 
 ## 1. Where things stand
 
@@ -21,10 +23,12 @@ alone on purpose.
 | Undo, ownership, registry reconcile | Working |
 | Lazy context packs and sprite script detail | Working |
 | Python bridge, validator, compiler, providers | Working |
-| **Scratch-Python front end (`generator = dsl`)** | **Built on branch `pydsl`, live-verified end-to-end (bridge + image).** Output-quality iteration pending; the Phase C ladder tooling is built (`tools/ladder.py` + `docs/LADDER_RUBRIC.md`), the live measurement is not done yet; JSON stays the default. See §1a below, `PY_DSL_SCOPE.md`, `SCRATCH_AI_DSL_CONTEXT.md`. |
+| **Scratch-Python front end (`generator = dsl`)** | **Built and live-verified end to end (bridge + image).** JSON stays the default until the remaining measurement (§1a) says otherwise. See `PY_DSL_SCOPE.md`, `SCRATCH_AI_DSL_CONTEXT.md`. |
+| **Conversation memory (acked turns + one-line compression)** | **Working**; first live ladder A/B done, doodle-jump image replay pending (§1a) |
+| **Reply-envelope layer** | **Working**; audited-corpus replay clean, live A/B folded into the measurement in §1a |
 | **Release image (windowed, no control server)** | **Verified** |
 | **Release bundle (stock media, no secrets)** | **Built, about 50.6 MB** |
-| Tests | **407 passed, 2 skipped** on a fresh clone (media fixture) |
+| Tests | **852 passed, 4 skipped** on a fresh clone (media fixture, no audit corpus); **854, 2** with the local corpus |
 | Live model path | `opencode-go` → `deepseek-v4.1-flash` |
 
 The Usage page's Model row also has a small switcher between the two
@@ -67,124 +71,74 @@ Build it with:
 The builder loads `17c → 16b → 22 → 38 → 29 → 40` into a temporary copy of
 `ScratchAiTesting`, so it doesn't depend on the older methods in the seed.
 
-## 1a. Scratch-Python front end (branch `pydsl`)
+## 1a. Scratch-Python front end
 
-All of this lives on the `pydsl` worktree branch (the sibling folder
-`Scratch harness pydsl`); `main` is untouched. Run the DSL bridge from that
-folder with `.\run_live.ps1 -Generator dsl` and the image from the main
-folder as usual. The image's Bridge tab Start button launches the **main
-folder's bridge in JSON mode** — for DSL testing, start the bridge yourself.
+`generator = dsl` makes the model answer in a checked Python subset instead
+of a JSON change set; the bridge transpiles it into exactly the change set the
+JSON path produces. It was built and measured on the `pydsl` branch
+(2026-11-16 → 2026-11-24) and is live-verified against the real image; the
+dated, evidence-level detail is in `docs/HISTORY.md` sessions 21–24. Run it
+with `.\run_live.ps1 -Generator dsl`. The image's Bridge tab Start button
+still launches the bridge in JSON mode, so start the bridge yourself for DSL
+work.
 
-**Done and verified:**
+As built (one line each):
 
-- `harness/dsl/` transpiler (vocabulary generated from `SPECS`, AST
-  whitelist, line-precise diagnostics), IR renderer with `load_sprite`
-  dialect rendering, `python -m harness.dsl.lint`; `generator = json | dsl`
-  through config, providers, prompts, the agent loop and audit; dialect
-  appendix `SCRATCH_AI_DSL_CONTEXT.md`; `tools/dsl_smoke.py`;
-  `tools/audit.py score --group generator`.
-- Suite: 550 passed, 2 skipped (407 baseline + 143 new). Round-trip: 143
-  historical audit bundles, zero mismatches; the 16 unrenderable bundles are
-  original JSON-era model defects (invented ops, wrong argument names, bad
-  menus) — the error classes this front end turns into parse-time rejections.
-- Live (`deepseek-v4.1-flash`, dsl mode): every observed turn transpiled
-  first-try with zero repairs — square 106, platformer 607–776, HUD 62–123
-  completion tokens; the largest turn (11 changes plus two lazy pack loads)
-  ran 7.8 s wall. JSON-era equivalents cost ~500–3,500 completion tokens
-  with frequent `bad_json` retries. The platformer and triangle turns
-  applied and are visible in the image; the revision flow used `script_id`
-  replacement correctly once the mode-aware registry hint landed.
-- **Phase C ladder tooling** (`tools\ladder.py` +
-  `docs\LADDER_RUBRIC.md`): the same prompts through both generators with
-  full audit bundles, scenario chaining (a revision turn sees the state its
-  predecessor built, so `load_sprite`/`replace_script` are exercised),
-  `manifest.json`/`summary.json` with a mechanical `flip_verdict`, and a
-  per-scenario human rubric. Offline wiring test included; the suite is
-  **626 passed, 2 skipped** (584 + 9 pack-dialect + 24 lint + 9 media
-  ranking tests).
-- **Advisory runtime lints** (`harness/lints.py`): deterministic, no model
-  calls, warnings only. Flags a `forever`/`repeat_until` whose direct body
-  moves the sprite with no `wait` anywhere in its subtree (drift), an
-  unconditional `next_costume` at frame rate (flicker), and a newly created
-  zero-initial variable read but never written in the change set or in
-  AI-owned script tuples (never-written read). The canonical examples
-  (key-driven motion inside `if`, the waitless spinning bat, paddle `set_x`,
-  finite pen `repeat`, `switch_costume`) are deliberate exclusions. Warnings
-  ride the `#result` chat lines as `warning: ...` and land in `lints.json`
-  in full audit bundles; they never feed a repair.
-- **Known-good media tier** (`tools\mine_media_usage.py`,
-  `harness\known_media.py`, seeded `known_media.json`): `ok` audit turns are
-  mined for the library references in their applied
-  `create_sprite`/`add_costume`/`set_backdrop` changes, canonicalized against
-  the installed media tree (so the pre-cleanup `Things/…`, `Fantasy/…` paths map
-  to today's `UI/…`, `Players/…`), and rendered as a compact block beside the
-  verified prop paths. `MediaLibrary.resolve`'s near matches list known-good
-  paths first. With no data both consumers are exactly as before. Seed: 66
-  paths, 147 uses, led by `Players/fantasy1-a.png` (20), `UI/button.gif` (8)
-  and `Sports/beachball1.png` (6). Regenerate after meaningful live sessions
-  with `python tools\mine_media_usage.py --dir scratch\base\audit` and commit
-  the result; `--check` fails in CI when the file is stale.
-- **Parse-time context and media gates** (`harness/dsl/parse.py`, 31 tests in
-  `test_dsl_gates.py`): unknown script targets (`@on_flag(target="Ground")`),
-  missing/unknown sprite targets on `create_variable`/`create_list` sprite
-  scope, `duplicate_sprite`, `delete_sprite`, `set_sprite` and `add_costume`,
-  unknown costume/sound/backdrop names in
-  `switch_costume`/`play_sound`/`switch_backdrop`, and unresolvable library
-  paths or sprite presets now fail during `transpile`/`lint` with line-precise
-  diagnostics and did-you-mean hints instead of costing a model round trip in
-  `validate_changeset`. The gates are order-aware (a sprite or costume added
-  earlier in the module counts), skip cleanly without a context or an installed
-  media tree, and leave the validator as defense in depth; the JSON path is
-  untouched.
-- **Revision fidelity, diagnosed and fixed (2026-11-23, measured):** live
-  bundles showed dsl-mode revisions replacing scripts *blind* — the model
-  reconstructed them from labels and top-level block counts (loop bodies are
-  invisible to the count) and silently dropped behaviors: a "jump higher and
-  run faster" revision deleted platform landing (`touching`), animation
-  (`next_costume`) and bounds (`set_x`) while its notes claimed nothing was
-  lost. JSON-mode revisions never did this — their appendix teaches
-  load-first. Two layers landed: the dialect appendix and registry hint now
-  teach load-before-replace (json paths byte-identical), and the bridge
-  enforces it with a **replace echo** — a valid change set that
-  blind-replaces an AI-owned script whose tuples the bridge holds triggers
-  exactly one resend showing the current bodies plus the model's own
-  submission, asking for a merge-aware resubmission (not a repair, once per
-  turn, audited with a `replace_echo` marker). Re-measured with
-  `tools\ladder.py -Runs 3 -Scenarios platformer_chain`: dsl revisions went
-  from 3/3 blind with 5-6 dropped ops to 0/3 blind with 0 dropped ops (the
-  single flagged op was a `set_x(x_position()+4)` -> `change_x(run_speed)`
-  improvement), at ~2-3 extra attempts per revision. Score future runs with
-  `tools\revision_fidelity.py <ladder-session-dir>`.
-- **No-op replace guard + acknowledgment replies (2026-11-23, from the
-  audited doodle-jump session):** a later turn re-sent three scripts
-  byte-identical to the current ones while the chat claimed "Platforms
-  start lower" — narrating the status quo as a change. The bridge now
-  detects a `replace_script` whose hat, body and label match the current
-  tuples (failing open whenever decompilation is uncertain). Fully no-op
-  turns get one guard round trip showing the identical bodies and two
-  outs: make the real change, or reply that the request is already
-  satisfied. Mixed turns strip the no-ops with a `warning:` line and apply
-  the rest. The **acknowledgment reply** is legal end to end in both
-  generators: an empty `changes` list validates and applies nothing while
-  the summary still reaches the chat; a `summary(...)`/`notes(...)`-only
-  dialect module is accepted (a truly empty module still errors). Blind
-  real replaces still get the replace echo; the guard runs first.
+- **Transpiler** — `harness/dsl/`: vocabulary generated from the block
+  `SPECS`, AST whitelist, line-precise diagnostics that quote the offending
+  source line, `python -m harness.dsl.lint`, an IR renderer for
+  `load_sprite` detail, the `SCRATCH_AI_DSL_CONTEXT.md` appendix, and
+  `generator = json | dsl` wired through config, providers, prompts, the
+  agent loop and audit.
+- **Reply envelope** — `harness/dsl/envelope.py`: pure, line-based recovery
+  of sloppy reply shapes (prose around the fence, a missing close,
+  `summary()`/`notes()` after the closing fence, doubled fences, CRLF/BOM).
+  Recoveries cost **zero repairs** (advisory `warning:` lines plus audit
+  fields); a second fenced block, module-shaped code outside the fence, or a
+  prose-only reply is a fatal diagnostic naming the raw line, counted as
+  non-validation so the reserved validation repair still earns. The
+  `stop`-sequence plumbing exists but stays off until a live ladder A/B.
+- **Parse-time gates** — unknown script/sprite targets, duplicate
+  variable/list/sprite names, unknown costume/sound/backdrop names and
+  unresolvable library paths fail during transpile with did-you-mean hints
+  instead of costing a model round trip in `validate_changeset`.
+- **Repair quality** — the ambiguous-`+` diagnostic names both operands and
+  the exact `add()`/`join()` rewrite; one reserved extra repair for a full
+  change set that fails validation after non-validation repairs.
+- **Revision fidelity** — the appendix and registry hint teach
+  load-before-replace; the bridge enforces it with a **replace echo** (one
+  resend with the current bodies) and a **no-op guard** for byte-identical
+  replaces, with the acknowledgment reply legal end to end.
+- **Conversation memory** — `harness/history.py`: a bounded ring of **acked**
+  turns rendered between request and project context (the last four
+  near-verbatim, older turns as one-liners) with its own trimming ladder
+  (H1/H2, 2400-char cap) running ahead of the context ladder;
+  `resolve_history() = off` restores byte-identical stateless prompts.
+- **Advisory lints** — deterministic warnings for waitless drift, frame-rate
+  flicker and never-written reads; they ride the `#result` chat lines and
+  never feed a repair.
+- **Known-good media tier** — `known_media.json`, mined from `ok` audit
+  turns, ranks `MediaLibrary.resolve`'s near matches by verified live use.
+  Regenerate with `tools\mine_media_usage.py`; `--check` fails CI on staleness.
+- **Measurement tooling** — `tools\ladder.py` (scenario chains, history
+  A/B, referential rungs), `docs/LADDER_RUBRIC.md`,
+  `tools\revision_fidelity.py`, and `audit.py score --group generator` with
+  its `envelope:` outcome class.
 
-**Still weak — the honest part:** syntax reliability and token efficiency
-are solved; **output quality is not**. The ladder has now been run live
-(twice, both modes, 100% applied; dsl ahead on tokens and attempts), packs
-are dialect-first, and revision fidelity is fixed and measured. The open
-front is **conversation memory**: the 2026-11-23 audited doodle-jump session
-showed referential requests ("make it smaller", "start lower") landing on a
-stateless model, and a fully no-op turn narrated as new changes (the no-op
-guard now catches the mechanical half; nothing yet gives the model the
-conversation that would prevent it). **The next task on this branch is chat
-history + rolling summary — see `CHAT_HISTORY_SCOPE.md`** for the full plan
-(store, ack-gated recording, prompt section with its own budget stages,
-phases, tests, success criteria). It is bridge-side only: zero Squeak and
-zero wire work. After it lands, replay the doodle-jump flow with
-`-Audit full` (build → "make everything smaller" → "start lower") and
-decide the `dsl` default flip on the accumulated ladder evidence.
+**Still weak — the honest part:** syntax reliability and token efficiency are
+solved; **output quality is not**. The live ladder runs (both modes, 100%
+applied, dsl ahead on tokens and attempts) and the first history A/B are
+encouraging but thin. The open front is **measurement**: replay the
+2026-11-23 doodle-jump flow through the image with `-Audit full` (build →
+"make everything smaller" → "start lower"), history on and off, both modes,
+scored with `tools\revision_fidelity.py` and the `CHAT_HISTORY_SCOPE.md` §5
+criteria — referential words resolve against remembered values, no identical
+re-apply is narrated as a change, history-on applied rate is not worse, the
+section stays under budget. The same runs measure the envelope (attempts,
+completion tokens, the `envelope:` score class) and gate the `stop`-sequence
+flip. Then decide the `dsl` default on that evidence. Phase C (an
+LLM-maintained rolling summary) stays unbuilt until the replay shows the
+deterministic one-liners actually losing intent.
 
 **Runtime notes from the 2026-11-23 live session (learned the hard way):**
 
@@ -271,14 +225,16 @@ run. Bundles contain prompts and raw replies, so keep them local.
 ```powershell
 cd bridge
 $env:PYTHONPATH="src"
-python -m pytest -q          # 407 passed, 2 skipped
+python -m pytest -q          # 852 passed, 4 skipped on a fresh clone
 cd ..
 python tools\check_st.py     # every image/*.st
 ```
 
 `bridge\tests\conftest.py` generates a small media fixture when
 `scratch\base\Media` is missing, so CI and a fresh clone don't need the runtime.
-`HARNESS_MEDIA_ROOT` overrides the media root.
+`HARNESS_MEDIA_ROOT` overrides the media root. The two envelope-corpus tests
+(`test_dsl_envelope_corpus.py`) additionally skip without the local
+`scratch\base\audit` corpus — see [`TESTING.md`](TESTING.md).
 
 The deterministic image path:
 
@@ -345,18 +301,20 @@ What's missing, and what I'd try next, roughly in order:
    small local proxy or reverse-connect transport would remove the
    `0.0.0.0:8767` exposure and the firewall prompt.
 4. **Import gaps:** sound import, `.sprite` bundle import and a sound editor.
-5. **Model quality loop:** use `-Audit full`, `audit.py score`, and try a plan
-   followed by per-script chunks. I haven't measured that yet. The
-   `generator = json | dsl` A/B tooling now exists (`audit.py score --group
-   generator`, `tools/dsl_smoke.py`, `run_live.ps1 -Generator`) but the
-   Phase C ladder itself has not been run.
+5. **The measurement matrix:** the full A/B (history on/off × both modes,
+   doodle-jump replay through the image, envelope effects) has not been run.
+   The tooling exists — `run_live.ps1 -Generator/-History`,
+   `tools\ladder.py`, `tools\revision_fidelity.py`,
+   `audit.py score --group generator`. Run it before flipping the `dsl`
+   default or the `stop`-sequence flag.
 6. **Trademark-safe branding** before any wide public distribution.
 
-Also not there yet: chat history in requests, exact per-turn token accounting
-(the Usage page's **Last turn** is a request-count delta), and full asset
-import for every PNG variant (BMP covers the round trip). The Bridge tab can
-start the bridge but not stop it. Stop it by closing its launcher console, or
-with `tools\stop_bridge.ps1`. Profile and audit changes still come from
+Also not there yet: exact per-turn token accounting (the Usage page's **Last
+turn** is a request-count delta), history persistence or a wire-side reset on
+project open/new (history is process-lifetime with a caveat line), and full
+asset import for every PNG variant (BMP covers the round trip). The Bridge tab
+can start the bridge but not stop it. Stop it by closing its launcher console,
+or with `tools\stop_bridge.ps1`. Profile and audit changes still come from
 `run_live.ps1` flags.
 
 ## 8. Where the detail lives
@@ -374,14 +332,17 @@ with `tools\stop_bridge.ps1`. Profile and audit changes still come from
 | `context/` | lazy packs: clones, games, scrolling, pen-3d |
 | `SPRITE_STAGE_SCOPE.md` | sprite and stage, as built |
 | `DEEPSEEK_CONNECTION_SCOPE.md` | connection package |
-| `PY_DSL_SCOPE.md` | Python-subset front end: implemented (Phases A–B) with live-smoke findings; Phase C ladder pending |
-| `tools/ladder.py` + `docs/LADDER_RUBRIC.md` | Phase C benchmark: both generators, audit bundles, flip verdict, human rubric |
+| `PY_DSL_SCOPE.md` | Python-subset front end: built and live-verified; the dsl-default flip awaits the measurement matrix |
+| `SCRATCH_AI_DSL_CONTEXT.md` | the dialect appendix (reply contract, API reference) |
+| `harness/dsl/envelope.py` | reply-envelope rule matrix (docstring) |
+| `tools/ladder.py` + `docs/LADDER_RUBRIC.md` | benchmark: both generators, audit bundles, history A/B, flip verdict, human rubric |
 | `tools/revision_fidelity.py` | revision scorer: dropped-op diffs + load/echo classification from ladder bundles |
-| `CHAT_HISTORY_SCOPE.md` | **the next task**: conversation history + rolling summary, full plan with anchors, phases and success criteria |
+| `CHAT_HISTORY_SCOPE.md` | conversation history + rolling summary: Phase A+B landed; live replay pending |
 | `tools/render_pack_json.py` + `tools/pack_examples.py` | context packs: canonical dialect examples, generated JSON twins, per-pack SETUP, `--check` sync |
 | `tools/validate_packs.py` | offline validate/compile for the games, clones and scrolling examples |
 | `CHAT_UI_SCOPE.md` | docked rail |
 | `SCRATCH_2_FEATURE_AUDIT.md` | clones and BYOB audit |
+| `docs/HISTORY.md` | session-by-session record (sessions 1–24) |
 | `docs/SQUEAK_NOTES.md` | the Squeak and Scratch traps |
 | `docs/HANDOFF-2026-11-15.md` | session-22 detailed handoff (historical) |
 | `docs/UI_TOUR.md` | rail ↔ native pane map |

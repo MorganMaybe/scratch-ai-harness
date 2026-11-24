@@ -297,8 +297,9 @@ def test_pending_ttl_sweeps_and_expired_applied_is_only_acknowledged():
     response = bridge.handle([Sym("request"), 1, ["Draw a square."], "Sprite1"])[0]
     assert response[0] == Sym("result")
     entry = bridge.pending[1]
-    assert isinstance(entry, tuple) and len(entry) == 2
+    assert isinstance(entry, tuple) and len(entry) == 3
     assert entry[1] == 100.0
+    assert entry[2] == "Draw a square."
 
     now[0] = 111.0  # 11 s old: older than the 10 s TTL
     assert bridge.handle([Sym("ping")]) == [[Sym("pong")]]  # any message sweeps

@@ -13,9 +13,10 @@ import difflib
 from typing import Any
 
 from ..block_ir import Change, ChangeSet, IRError
-from ..catalog import SPRITE_TARGET_OPS, ArgSpec, spec_for
+from ..catalog import TARGET_MENU, SPRITE_TARGET_OPS, ArgSpec, spec_for
 from ..context import ProjectContext
 from ..media import BACKDROP, COSTUME, MediaError, default_library
+from . import envelope
 from .errors import MAX_DIAGNOSTICS, DSLError, DSLErrors
 from .vocab import (
     CALLABLE_SPECS,
@@ -160,8 +161,25 @@ RANGE2_MESSAGE = (
     "range(a, b) is not supported yet; write for _ in range(b - a) instead."
 )
 AMBIGPLUS_MESSAGE = (
-    "'+' between two computed values is ambiguous in Scratch; write "
-    "join(a, b) to build text or add(a, b) to add numbers."
+    "'+' between two computed values is ambiguous in Scratch"
+)
+DUPVAR_MESSAGE = "variable {name!r} already exists; reuse it"
+DUPLIST_MESSAGE = "list {name!r} already exists; reuse it"
+DUPNAME_HINT = (
+    "a name from the project context or an earlier module call is already "
+    "available; remove this create line, assign existing variables inside the "
+    "script (name = value), and pass existing lists by name"
+)
+SPRITENAME_STAGE_MESSAGE = "a sprite cannot be named 'Stage'"
+SPRITENAME_MENU_MESSAGE = "sprite name {name!r} is a Scratch menu value"
+SPRITENAME_EXISTS_MESSAGE = "sprite {name!r} already exists"
+SPRITENAME_HINT = (
+    "choose a different sprite name; 'edge' and 'mouse-pointer' are values "
+    "in the touching/goto menus, and 'Stage' is the backdrop"
+)
+SPRITENAME_EXISTS_HINT = (
+    "use set_sprite() to change the existing sprite or duplicate_sprite() to "
+    "make a copy"
 )
 CONDITION_MESSAGE = (
     "condition must be a boolean reporter such as touching(\"edge\"), "
@@ -176,21 +194,18 @@ def _line(node: ast.AST) -> int | None:
     return getattr(node, "lineno", None)
 
 
-def _strip_code_fences(source: str) -> str:
-    """Remove one surrounding Markdown fence from a model reply.
+def _menu_index(value: str) -> int | None:
+    """The leading integer of a numeric menu entry like ``"1 (Snare Drum)"``."""
+    head = str(value).split(" ", 1)[0]
+    try:
+        return int(head)
+    except (TypeError, ValueError):
+        return None
 
-    Any info string is accepted (``python``, ``json``, empty).  Prose before a
-    fence is deliberately left alone so the Python parser reports it as a
-    syntax error at its line.
-    """
-    text = source.strip()
-    if not text.startswith("```"):
-        return text
-    lines = text.splitlines()
-    body = lines[1:]
-    if body and body[-1].strip().startswith("```"):
-        body = body[:-1]
-    return "\n".join(body).strip("\n")
+
+def _numeric_menu(menu: tuple[str, ...]) -> bool:
+    """True when every entry is indexed (drums, instruments), so a number works."""
+    return bool(menu) and all(_menu_index(entry) is not None for entry in menu)
 
 
 def _is_number_constant(node: ast.AST) -> bool:
@@ -211,6 +226,21 @@ def _is_scalar_literal(node: ast.AST) -> bool:
 
 def _is_string_constant(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _ambiguous_plus_message(node: ast.BinOp) -> str:
+    """Name both operands so the repair is mechanical.
+
+    The transpiler does not inspect the project to guess whether a variable
+    holds text or a number: Scratch values are dynamically typed, so the model
+    marks intent with ``add()`` or ``join()``.
+    """
+    left = ast.unparse(node.left)
+    right = ast.unparse(node.right)
+    return (
+        f"{AMBIGPLUS_MESSAGE}: {left} + {right}. Write add({left}, {right}) "
+        f"to add numbers or join({left}, {right}) to build text."
+    )
 
 
 def _duplicate_argument(op: str, name: str, line: int | None) -> DSLError:
@@ -258,8 +288,17 @@ def _media_error(exc: MediaError, line: int | None) -> DSLError:
 class _Transpiler:
     """One reply's walk over the AST."""
 
-    def __init__(self, context: ProjectContext | None):
+    def __init__(
+        self,
+        context: ProjectContext | None,
+        *,
+        check_names: bool = True,
+    ):
         self.context = context
+        #: Renderer and pack fixtures round-trip synthetic change sets whose
+        #: context already contains the names they create. Real turns keep the
+        #: strict validator-mirroring name gates.
+        self.check_names = check_names
         self.errors: list[DSLError] = []
         self.changes: list[Change] = []
         self.summary = "Updated the project."
@@ -269,6 +308,8 @@ class _Transpiler:
         self.saw_reply_metadata = False
         self.created_globals: set[str] = set()
         self.created_sprite_vars: dict[str, set[str]] = {}
+        self.created_global_lists: set[str] = set()
+        self.created_sprite_lists: dict[str, set[str]] = {}
         #: Costume/backdrop names this module already added, per target.
         self.created_costumes: dict[str, set[str]] = {}
         self.sprite_names: set[str] = set(
@@ -382,7 +423,11 @@ class _Transpiler:
                 raise DSLError(
                     COLLIDE_MESSAGE.format(name=variable), line=call.lineno
                 )
+        if spec.action in {"create_variable", "create_list"}:
+            self._check_module_name(spec, values, call.lineno)
         self._check_module_target(spec, values, call.lineno)
+        if spec.action in {"create_sprite", "duplicate_sprite"}:
+            self._check_sprite_name(values["name"], call.lineno, spec.name)
         self._check_module_media(spec, values, raw, call.lineno)
         data: dict[str, Any] = {"action": spec.action}
         for param in spec.params:
@@ -397,6 +442,14 @@ class _Transpiler:
                 self.created_sprite_vars.setdefault(target, set()).add(variable)
             else:
                 self.created_globals.add(variable)
+        elif spec.action == "create_list":
+            list_name = values["name"]
+            scope = values.get("scope", "global")
+            target = values.get("target")
+            if scope == "sprite" and target:
+                self.created_sprite_lists.setdefault(target, set()).add(list_name)
+            else:
+                self.created_global_lists.add(list_name)
         elif spec.action == "create_sprite":
             self.sprite_names.add(values["name"])
             self.created_costumes[values["name"]] = self._created_costume_names(
@@ -633,6 +686,79 @@ class _Transpiler:
                 line,
                 f"{spec.name}()",
                 allow_stage=spec.action == "add_costume",
+            )
+
+    def _check_module_name(
+        self, spec: ModuleCallSpec, values: dict[str, Any], line: int | None
+    ) -> None:
+        """Reject re-creating a name the project or this module already has."""
+        if not self.check_names:
+            return
+        name = values["name"]
+        scope = values.get("scope", "global")
+        target = values.get("target")
+        if spec.action == "create_variable":
+            existing = self._known_variable_names(scope, target)
+            message = DUPVAR_MESSAGE
+        else:
+            existing = self._known_list_names(scope, target)
+            message = DUPLIST_MESSAGE
+        if name in existing:
+            raise DSLError(message.format(name=name), line=line, hint=DUPNAME_HINT)
+
+    def _known_variable_names(
+        self, scope: str, target: str | None
+    ) -> set[str]:
+        names = set(self.created_globals)
+        if scope == "sprite" and target:
+            names.update(self.created_sprite_vars.get(target, set()))
+        elif scope == "global" and self.context is not None:
+            # The validator resolves a global name against the request target
+            # too, so mirror that here instead of accepting a name it rejects.
+            names.update(self.created_sprite_vars.get(self.context.target, set()))
+        if self.context is not None:
+            names.update(
+                self.context.variable_names(
+                    target if scope == "sprite" else None
+                )
+            )
+        return names
+
+    def _known_list_names(self, scope: str, target: str | None) -> set[str]:
+        names = set(self.created_global_lists)
+        if scope == "sprite" and target:
+            names.update(self.created_sprite_lists.get(target, set()))
+        if self.context is not None:
+            if scope == "sprite" and target:
+                names.update(self.context.list_names(target))
+            else:
+                names.update(self.context.stage_lists)
+        return names
+
+    def _check_sprite_name(
+        self, name: str, line: int | None, op: str
+    ) -> None:
+        if not self.check_names:
+            return
+        text = name.strip()
+        if not text:
+            raise DSLError(f"{op}() needs a sprite name", line=line)
+        key = text.casefold()
+        if key == "stage":
+            raise DSLError(
+                SPRITENAME_STAGE_MESSAGE, line=line, hint=SPRITENAME_HINT
+            )
+        if key in {item.casefold() for item in TARGET_MENU}:
+            raise DSLError(
+                SPRITENAME_MENU_MESSAGE.format(name=text),
+                line=line,
+                hint=SPRITENAME_HINT,
+            )
+        if key in {item.casefold() for item in self.sprite_names}:
+            raise DSLError(
+                SPRITENAME_EXISTS_MESSAGE.format(name=text),
+                line=line,
+                hint=SPRITENAME_EXISTS_HINT,
             )
 
     def _require_known_sprite(
@@ -1515,7 +1641,9 @@ class _Transpiler:
             if not _is_scalar_literal(node.left) and not _is_scalar_literal(
                 node.right
             ):
-                raise DSLError(AMBIGPLUS_MESSAGE, line=_line(node))
+                raise DSLError(
+                    _ambiguous_plus_message(node), line=_line(node)
+                )
             return {
                 "op": "add",
                 "args": {"a": self._expr(node.left), "b": self._expr(node.right)},
@@ -1580,28 +1708,29 @@ class _Transpiler:
 
     def _arg_value(self, op: str, spec: ArgSpec, node: ast.expr) -> Any:
         if spec.type == "menu":
-            if not isinstance(node, ast.Constant) or not isinstance(
-                node.value, str
-            ):
-                raise DSLError(
-                    MENU_MESSAGE.format(
-                        op=op,
-                        arg=spec.name,
-                        values=", ".join(self._menu_values(op, spec)),
-                    ),
-                    line=_line(node),
-                )
-            value = node.value
-            if value not in self._menu_values(op, spec):
-                raise DSLError(
-                    MENU_MESSAGE.format(
-                        op=op,
-                        arg=spec.name,
-                        values=", ".join(self._menu_values(op, spec)),
-                    ),
-                    line=_line(node),
-                )
-            return value
+            values = self._menu_values(op, spec)
+            if isinstance(node, ast.Constant):
+                # Numeric menus (drums, instruments) accept their index, like
+                # the JSON change set and the image do.  String menus keep
+                # their exact names.
+                if isinstance(node.value, str):
+                    if node.value in values:
+                        return node.value
+                elif (
+                    isinstance(node.value, (int, float))
+                    and not isinstance(node.value, bool)
+                    and _numeric_menu(values)
+                    and any(_menu_index(entry) == node.value for entry in values)
+                ):
+                    return node.value
+            raise DSLError(
+                MENU_MESSAGE.format(
+                    op=op,
+                    arg=spec.name,
+                    values=", ".join(values),
+                ),
+                line=_line(node),
+            )
         if spec.type in {"string", "color", "list", "list_index", "clone_target"}:
             if not isinstance(node, ast.Constant):
                 raise DSLError(
@@ -1698,19 +1827,50 @@ def _has_arguments(arguments: ast.arguments) -> bool:
 
 
 def transpile(
-    source: str, context: ProjectContext | None = None
+    source: str,
+    context: ProjectContext | None = None,
+    *,
+    check_names: bool = True,
 ) -> ChangeSet:
-    """Transpile one Scratch-Python reply into a :class:`ChangeSet`."""
-    text = _strip_code_fences(source)
+    """Transpile one Scratch-Python reply into a :class:`ChangeSet`.
+
+    The reply envelope (fences, tags, trailing prose, CRLF/BOM) is
+    normalized first by :func:`harness.dsl.envelope.normalize`; a reply
+    whose shape cannot be recovered raises that layer's diagnostic instead
+    of a Python syntax error.  ``check_names=False`` is for renderer and
+    pack fixtures whose synthetic context pre-populates the names (and
+    sometimes the invalid names) the module creates. Production turns keep
+    the strict name gates.
+    """
+    norm = envelope.normalize(source)
+    if norm.fatal is not None:
+        raise norm.fatal
+    text = norm.module_text
     try:
         module = ast.parse(text)
     except SyntaxError as exc:
+        # A reply ``ast`` cannot parse at all is usually prose, not broken
+        # Python: report the reply shape instead of a confusing syntax error.
+        # Forbidden-but-valid Python (``import``, ``class``) never reaches
+        # this handler and keeps its precise dialect diagnostic.
+        prose = envelope.prose_diagnostic(text)
+        if prose is not None:
+            raise prose from None
         raise DSLError(
             f"Python syntax error: {exc.msg}.{SYNTAX_SUFFIX}",
             line=exc.lineno,
             col=exc.offset,
+            source=text,
         ) from None
-    return _Transpiler(context).run(module)
+    try:
+        return _Transpiler(context, check_names=check_names).run(module)
+    except DSLErrors as exc:
+        # Attach the module text so a repair prompt can quote the offending
+        # line; the default ``format()`` output stays unchanged.
+        for error in exc.errors:
+            if error.source is None:
+                error.source = text
+        raise
 
 
 def lint(source: str, context: ProjectContext | None = None) -> list[str]:

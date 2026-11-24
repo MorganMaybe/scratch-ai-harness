@@ -7,6 +7,13 @@ from typing import Any
 from . import known_media
 from .catalog import catalog_summary
 from .context import ProjectContext, ScriptSummary
+from .history import (
+    MIN_VERBATIM_TURNS,
+    ONE_LINER_LIMIT,
+    VERBATIM_TURNS,
+    HistoryStats,
+    render_history,
+)
 
 #: Environment variable that overrides the default prompt budget.
 PROMPT_BUDGET_ENV = "HARNESS_PROMPT_BUDGET"
@@ -873,11 +880,18 @@ def _reply_tail(generator: str) -> str:
     return DSL_REPLY_TAIL if generator == "dsl" else JSON_REPLY_TAIL
 
 
-def _user_prompt(request: str, context_text: str, tail: str = JSON_REPLY_TAIL) -> str:
+def _user_prompt(
+    request: str,
+    context_text: str,
+    tail: str = JSON_REPLY_TAIL,
+    history_text: str = "",
+) -> str:
+    history_part = f"\n\n{history_text}" if history_text else ""
     return (
         f"User request:\n"
-        f"{request}\n"
-        f"\n"
+        f"{request}"
+        f"{history_part}"
+        f"\n\n"
         f"Project context:\n"
         f"{context_text}"
         f"{tail}"
@@ -901,14 +915,18 @@ def _hard_user_fit(
     budget: int,
     full_len: int,
     tail: str = JSON_REPLY_TAIL,
-) -> tuple[str, int]:
+    history_text: str = "",
+) -> tuple[str, int, bool]:
     """Trim context detail and the request, keeping the targeting surface.
 
-    Returns ``(prompt, dropped_chars)`` so the audit bundle can record how much
-    of the original request/context did not reach the model.
+    Returns ``(prompt, dropped_chars, used_history)`` so the audit bundle can
+    record how much of the original request/context did not reach the model.
+    The conversation section is dropped entirely before the targeting surface
+    is sacrificed: memory is optional, the project context is not.
     """
     head = "User request:\n"
     context_head = "\n\nProject context:\n"
+    history_part = f"\n\n{history_text}" if history_text else ""
     template = "[truncated {n} chars]"
     marker_reserve = len("\n" + template.format(n=9999999999))
 
@@ -918,26 +936,29 @@ def _hard_user_fit(
         candidates.extend(core[:index] for index in range(len(core) - 1, 0, -1))
     candidates.append([])
 
-    for candidate in candidates:
-        context_text = "\n".join(candidate)
-        for include_tail in (True, False):
-            fixed = head + context_head + context_text
-            if include_tail:
-                fixed += tail
-            room = budget - len(fixed) - marker_reserve
-            if room < 0:
-                continue
-            kept_request = request if len(request) <= room else request[:room].rstrip()
-            content = head + kept_request + context_head + context_text
-            if include_tail:
-                content += tail
-            dropped = max(0, full_len - len(content))
-            marker = template.format(n=dropped)
-            text = content.rstrip("\n") + "\n" + marker
-            return text, dropped
+    history_options = (True, False) if history_text else (False,)
+    for use_history in history_options:
+        hist = history_part if use_history else ""
+        for candidate in candidates:
+            context_text = "\n".join(candidate)
+            for include_tail in (True, False):
+                fixed = head + hist + context_head + context_text
+                if include_tail:
+                    fixed += tail
+                room = budget - len(fixed) - marker_reserve
+                if room < 0:
+                    continue
+                kept_request = request if len(request) <= room else request[:room].rstrip()
+                content = head + kept_request + hist + context_head + context_text
+                if include_tail:
+                    content += tail
+                dropped = max(0, full_len - len(content))
+                marker = template.format(n=dropped)
+                text = content.rstrip("\n") + "\n" + marker
+                return text, dropped, use_history
 
     text = _hard_cut(head, budget, template, full_len)
-    return text, max(0, full_len - len(text))
+    return text, max(0, full_len - len(text)), False
 
 
 def _user_meta(
@@ -948,7 +969,9 @@ def _user_meta(
     *,
     truncated: bool = False,
     dropped_chars: int = 0,
+    history: HistoryStats | None = None,
 ) -> dict[str, Any]:
+    stats = history or HistoryStats()
     return {
         "level": level,
         "chars": len(prompt),
@@ -957,6 +980,10 @@ def _user_meta(
         "truncated": truncated,
         "dropped_chars": dropped_chars,
         "context_chars": len(context_text),
+        "history_turns": stats.turns,
+        "history_chars": stats.chars,
+        "history_dropped": stats.dropped,
+        "history_verbatim": stats.verbatim,
     }
 
 
@@ -966,8 +993,16 @@ def build_user_prompt_with_meta(
     *,
     budget_chars: int | None = None,
     generator: str = "json",
+    history: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the user prompt and report which trimming stage was used.
+
+    ``history`` is a :class:`harness.history.ConversationHistory` (or any object
+    with a ``snapshot()`` returning records).  Its section is inserted between
+    the request and the project context and is trimmed on its own stages
+    **before** the context ladder, so memory never starves the targeting
+    surface.  With no history the prompt is byte-identical to the pre-history
+    builder, which the snapshot test in ``test_budget.py`` pins.
 
     The audit bundle records the metadata so a turn that dropped project detail
     can be distinguished from one that did not.  ``generator`` only picks the
@@ -978,21 +1013,62 @@ def build_user_prompt_with_meta(
     request = "" if request is None else str(request)
     tail = _reply_tail(generator)
 
-    full_context = context.summary_text(generator=generator)
-    full_prompt = _user_prompt(request, full_context, tail)
-    if len(full_prompt) <= budget:
-        return full_prompt, _user_meta(0, full_prompt, budget, full_context)
+    records: list[Any] = []
+    if history is not None:
+        snapshot = getattr(history, "snapshot", None)
+        records = snapshot() if callable(snapshot) else list(history)
 
+    full_context = context.summary_text(generator=generator)
+
+    # H0: the full verbatim window.  H1: only the last MIN_VERBATIM_TURNS
+    # verbatim, the rest compressed.  H2: at that compressed window, drop the
+    # oldest one-liners one at a time.  render_history also enforces the
+    # section's own hard cap at every stage.
+    candidates: list[tuple[str, HistoryStats]] = [("", HistoryStats())]
+    if records:
+        candidates = []
+        for verbatim in (VERBATIM_TURNS, MIN_VERBATIM_TURNS):
+            text, stats = render_history(records, verbatim_turns=verbatim)
+            if all(text != existing for existing, _ in candidates):
+                candidates.append((text, stats))
+        for limit in range(ONE_LINER_LIMIT - 1, -1, -1):
+            text, stats = render_history(
+                records,
+                verbatim_turns=MIN_VERBATIM_TURNS,
+                one_liner_limit=limit,
+            )
+            if all(text != existing for existing, _ in candidates):
+                candidates.append((text, stats))
+
+    full_prompt = _user_prompt(request, full_context, tail, candidates[0][0])
+    for history_text, stats in candidates:
+        prompt = _user_prompt(request, full_context, tail, history_text)
+        if len(prompt) <= budget:
+            return prompt, _user_meta(0, prompt, budget, full_context, history=stats)
+
+    history_text, stats = candidates[-1]
     for level in (1, 2, 3):
         context_text = _context_text(context, level, generator)
-        prompt = _user_prompt(request, context_text, tail)
+        prompt = _user_prompt(request, context_text, tail, history_text)
         if len(prompt) <= budget:
-            return prompt, _user_meta(level, prompt, budget, context_text)
+            return prompt, _user_meta(
+                level, prompt, budget, context_text, history=stats
+            )
 
     compact = _context_text(context, 3, generator)
-    prompt, dropped = _hard_user_fit(request, compact, budget, len(full_prompt), tail)
+    prompt, dropped, used_history = _hard_user_fit(
+        request, compact, budget, len(full_prompt), tail, history_text
+    )
+    if not used_history:
+        stats = HistoryStats(total=stats.total, dropped=stats.total)
     return prompt, _user_meta(
-        3, prompt, budget, compact, truncated=True, dropped_chars=dropped
+        3,
+        prompt,
+        budget,
+        compact,
+        truncated=True,
+        dropped_chars=dropped,
+        history=stats,
     )
 
 
@@ -1002,6 +1078,7 @@ def build_user_prompt(
     *,
     budget_chars: int | None = None,
     generator: str = "json",
+    history: Any = None,
 ) -> str:
     """Render the user prompt, trimming context detail before the request.
 
@@ -1009,9 +1086,14 @@ def build_user_prompt(
     detail is removed in four stages: per-script detail, costume/sound lists,
     variable/list labels, and finally a marked hard truncation that keeps the
     targeting surface (target sprite and every script id/label/owner).
+    Conversation history, when supplied, is trimmed on its own stages first.
     """
     return build_user_prompt_with_meta(
-        request, context, budget_chars=budget_chars, generator=generator
+        request,
+        context,
+        budget_chars=budget_chars,
+        generator=generator,
+        history=history,
     )[0]
 
 

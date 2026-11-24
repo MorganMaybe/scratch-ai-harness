@@ -406,3 +406,100 @@ Killed without saving, relaunched `ScratchAI9.image`, reopened
   records the real attempt count for validation failures.
 - New probe `probe_context_methods.st`; bridge suite 290 passed, 2 skipped.
   Details: `sessions/2026-11-15-session20.md`.
+
+## Sessions 21-24 - the Scratch-Python front end (2026-11-16 to 2026-11-24)
+
+Developed on the `pydsl` branch (17 commits from the `main` baseline),
+merged back into `main` on 2026-11-24. Scope docs: `PY_DSL_SCOPE.md`
+(the dialect), `CHAT_HISTORY_SCOPE.md` (memory), `SCRATCH_AI_DSL_CONTEXT.md`
+(the model appendix); the session-22 raw detail is in
+`docs/HANDOFF-2026-11-15.md`. Suite growth: 407 -> 852 on a fresh clone.
+
+- **Transpiler (sessions 21-22):** `harness/dsl/` - vocabulary generated from
+  the block `SPECS`, AST whitelist, line-precise diagnostics, IR renderer with
+  `load_sprite` rendering, `python -m harness.dsl.lint`;
+  `generator = json | dsl` through config, providers, prompts, the agent loop
+  and audit. Round-trip: 143 historical audit bundles, zero mismatches (the
+  16 unrenderable ones were original JSON-era model defects). Live
+  (`deepseek-v4.1-flash`, dsl): every observed turn transpiled first-try with
+  zero repairs - square 106, platformer 607-776, HUD 62-123 completion tokens,
+  largest turn 7.8 s wall, against JSON-era ~500-3,500 tokens with frequent
+  `bad_json` retries. 550 passed at that point.
+- **Ladder, lints, media tier (sessions 22-23):** `tools/ladder.py` +
+  `docs/LADDER_RUBRIC.md` (both generators, audit bundles, scenario chaining,
+  `flip_verdict`); advisory runtime lints (`harness/lints.py`) for waitless
+  drift, frame-rate flicker and never-written reads; known-good media tier
+  (`tools/mine_media_usage.py`, `harness/known_media.py`, seeded 66 paths /
+  147 uses) ranking `MediaLibrary.resolve` near matches by verified live use.
+- **Parse-time context and media gates (2026-11-23):** unknown script
+  targets, missing/unknown sprite targets on scoped calls, unknown
+  costume/sound/backdrop names and unresolvable library paths fail during
+  `transpile`/`lint` with did-you-mean hints instead of costing a validation
+  round trip; order-aware, JSON path untouched.
+- **Revision fidelity, replace echo (2026-11-23, measured):** live bundles
+  showed dsl revisions replacing scripts blind (a "jump higher and run faster"
+  revision dropped `touching`, `next_costume` and `set_x`). The appendix and
+  registry hint now teach load-before-replace, and the bridge enforces it with
+  one replace echo showing current bodies. Re-measured with
+  `tools/ladder.py -Runs 3 -Scenarios platformer_chain`: 3/3 blind with 5-6
+  dropped ops -> 0/3 blind, 0 dropped, ~2-3 extra attempts per revision.
+- **No-op replace guard + acknowledgment replies (2026-11-23):** from the
+  audited doodle-jump turn that re-sent three byte-identical scripts while
+  claiming "Platforms start lower". Fully no-op turns get one guard round
+  with two outs; mixed turns strip no-ops with a warning; the empty-`changes`
+  acknowledgment is legal end to end in both generators.
+- **Conversation history, Phase A+B (2026-11-23):** `harness/history.py` - a
+  24-record ring of acked turns recorded in `_take_pending` on `#applied`,
+  rendered between request and project context (4 verbatim + 8 one-liners,
+  H1/H2 trimming before the context ladder, 2400-char cap),
+  `resolve_history()` mirrors the generator switch. `tools/ladder.py` carries
+  history across chains and takes `-History on|off`; a referential
+  `start_lower` rung joined `platformer_chain`. First live A/B (dsl, one run
+  each): 3/3 applied both ways, referential rung resolved with real deltas;
+  history-on 1.33 attempts / 460.3 completion tokens vs 2.0 / 496.3 off,
+  section 1209 chars, nothing dropped. 695 passed at that point.
+- **Line-quoted DSL repairs + numeric menus (2026-11-23):** from the audited
+  doodle-jump first turn (`py = py + vy` failing three times while the repair
+  prompt never quoted the line). Diagnostics now carry the module text, the
+  repair prompt quotes `line 34: py = py + vy` exactly, and numeric menu
+  values (`play_drum(1, 0.1)`) are accepted where the image accepts indices.
+  Replay of the same request applies on attempt 2.
+- **Parse-time name gates + operand quoting (2026-11-24):** from the audited
+  rotating-cube turn that spent its last repair on duplicate variables and a
+  sprite named `Edge`. `create_variable`/`create_list`/`create_sprite`/
+  `duplicate_sprite` names are gated against context and earlier module calls;
+  the ambiguous-`+` diagnostic names both operands and the exact
+  `add()`/`join()` rewrites. Audit data kept the literal-sugar rule: 1,015
+  bare `+` in 108 DSL modules, 1,005 with a literal side, 10
+  computed/computed. 714 passed.
+- **One reserved repair for change-set validation (2026-11-24):** a full
+  change set or module that fails `validate_changeset` earns exactly one
+  extra repair when earlier repairs went to non-validation failures; all
+  validation repairs keep the normal cap; fragment refinement keeps it.
+  Generator-neutral. 719 passed.
+- **Reply-envelope layer (2026-11-24):** the motivating evidence was attempt
+  1 of the rotating-cube turn - `notes(...)` after the closing fence, the old
+  `_strip_code_fences` only stripping a fence on the last line, `ast.parse`
+  dying at the stray fence and hiding five real content diagnostics.
+  `harness/dsl/envelope.py` is a pure line-based
+  `normalize(raw) -> NormalizedReply(module_text, actions, fatal)`: prose
+  before the fence is skipped, a missing close recovers at EOF,
+  `summary()`/`notes()` after the close are appended as metadata, trailing
+  prose is dropped, tag variants/indented or doubled fences/CRLF/BOM
+  normalize; a second fenced block, module-shaped code outside the fence,
+  or a prose-only reply (classified after `ast` rejects the text, so
+  `import`/`class` keep their dialect diagnostics) is fatal with the raw
+  line. Recoveries cost zero repairs - they ride the success as
+  `warning: reply envelope: ...` lines plus audit `envelope_actions` fields;
+  fatals count as non-validation so the reserved validation repair still
+  earns. `audit.py score` gained an `envelope:` outcome class; the appendix
+  gained an exact reply-shape template; the `stop` sequence
+  (`"\n```"` on dsl completions, `HARNESS_STOP_SEQUENCE` /
+  `run_live.ps1 -StopSequence`) is plumbed but off pending a live A/B.
+  Verification: 105-test unit matrix, corpus replay over every DSL reply in
+  `scratch/base/audit` (9 turns, 24 attempts - no fence-line syntax error
+  survives; 3 envelope fatals: 2 prose-only, 1 two-block), and the cube
+  attempt-1 regression now surfacing the name and ambiguous-`+`
+  diagnostics. Suite 854 passed, 2 skipped with the corpus (852 + 4 skips
+  on a fresh clone).
+

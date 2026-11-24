@@ -182,6 +182,152 @@ def test_module_change_target_is_not_gated_without_a_context():
     assert change.target == "Pipe"
 
 
+# -- create name gate ----------------------------------------------------
+
+def named_context() -> ProjectContext:
+    ctx = context()
+    ctx.stage_variables.extend(["angle", "tilt"])
+    ctx.stage_lists.append("queue")
+    ctx.sprites["Ground"].variables.append("hp")
+    ctx.sprites["Ground"].lists.append("ground_queue")
+    return ctx
+
+
+def test_existing_global_variable_is_rejected_with_a_reuse_hint():
+    error = only('create_variable("angle")', named_context())
+
+    assert error.line == 1
+    assert error.message == "variable 'angle' already exists; reuse it"
+    assert "remove this create line" in error.hint
+    assert "name = value" in error.hint
+
+
+def test_variable_created_earlier_in_the_module_is_rejected():
+    text = source(
+        """
+        create_variable("spin")
+        create_variable("spin")
+        """
+    )
+
+    error = only(text, named_context())
+
+    assert error.line == 2
+    assert error.message == "variable 'spin' already exists; reuse it"
+
+
+def test_sprite_scoped_variable_that_shadows_a_global_is_rejected():
+    error = only(
+        'create_variable("angle", scope="sprite", target="Ground")',
+        named_context(),
+    )
+
+    assert error.message == "variable 'angle' already exists; reuse it"
+
+
+def test_existing_sprite_scoped_variable_is_rejected():
+    error = only(
+        'create_variable("hp", scope="sprite", target="Ground")',
+        named_context(),
+    )
+
+    assert error.message == "variable 'hp' already exists; reuse it"
+
+
+def test_existing_global_list_is_rejected():
+    error = only('create_list("queue")', named_context())
+
+    assert error.line == 1
+    assert error.message == "list 'queue' already exists; reuse it"
+    assert "remove this create line" in error.hint
+
+
+def test_list_created_earlier_in_the_module_is_rejected():
+    text = source(
+        """
+        create_list("seen", items=[])
+        create_list("seen", items=[])
+        """
+    )
+
+    error = only(text, named_context())
+
+    assert error.line == 2
+    assert error.message == "list 'seen' already exists; reuse it"
+
+
+def test_variables_and_lists_keep_separate_name_namespaces():
+    text = source(
+        """
+        create_list("angle", items=[])
+        create_variable("queue")
+        """
+    )
+
+    changes = transpile(text, named_context()).changes
+
+    assert [change.action for change in changes] == [
+        "create_list",
+        "create_variable",
+    ]
+
+
+@pytest.mark.parametrize(
+    "name", ["Stage", "stage", "Edge", "edge", "Mouse-Pointer"]
+)
+def test_reserved_sprite_name_is_rejected(name: str):
+    error = only(
+        f'create_sprite("{name}", costumes=["Animals/bat1-a.png"])',
+        context(),
+    )
+
+    assert error.line == 1
+    if name.casefold() == "stage":
+        assert error.message == "a sprite cannot be named 'Stage'"
+    else:
+        assert error.message == (
+            f"sprite name {name!r} is a Scratch menu value"
+        )
+    assert "choose a different sprite name" in error.hint
+
+
+def test_existing_sprite_name_is_rejected_case_insensitively():
+    error = only(
+        'create_sprite("ground", costumes=["Animals/bat1-a.png"])',
+        context(),
+    )
+
+    assert error.message == "sprite 'ground' already exists"
+    assert "set_sprite" in error.hint
+
+
+def test_sprite_created_earlier_in_the_module_cannot_be_recreated():
+    text = source(
+        """
+        create_sprite("Bird", costumes=["Animals/bat1-a.png"])
+        create_sprite("bird", costumes=["Animals/bat1-a.png"])
+        """
+    )
+
+    error = only(text, context())
+
+    assert error.line == 2
+    assert error.message == "sprite 'bird' already exists"
+
+
+def test_duplicate_sprite_new_name_is_gated():
+    error = only('duplicate_sprite("Ground", name="Edge")', context())
+
+    assert error.message == "sprite name 'Edge' is a Scratch menu value"
+
+
+def test_sprite_name_gate_runs_without_a_context():
+    error = only('create_sprite("Edge", costumes=["Animals/bat1-a.png"])')
+
+    assert error.line == 1
+    assert error.message == "sprite name 'Edge' is a Scratch menu value"
+
+
 # -- costume / sound / backdrop name gate --------------------------------
 
 

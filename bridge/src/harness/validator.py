@@ -349,7 +349,12 @@ def _sprite_name_issues(name: str, working: ProjectContext, path: str) -> list[V
     if key == "stage":
         issues.append(ValidationIssue(path, "a sprite cannot be named 'Stage'"))
     if key in {item.casefold() for item in TARGET_MENU}:
-        issues.append(ValidationIssue(path, f"{text!r} is reserved by Scratch"))
+        issues.append(
+            ValidationIssue(
+                path,
+                f"sprite name {text!r} is a Scratch menu value; choose another name",
+            )
+        )
     for existing in working.sprites:
         if existing.casefold() == key:
             issues.append(ValidationIssue(path, f"sprite {text!r} already exists"))

@@ -13,10 +13,16 @@ $env:PYTHONPATH="src"
 python -m pytest -q
 ```
 
-Expected: **407 passed, 2 skipped**. The two skips are the opt-in live model
-calls. When `scratch\base\Media` is absent, `tests\conftest.py` generates a
-small, deterministic media tree and points `HARNESS_MEDIA_ROOT` at it. If you
-have the real runtime, the tests index the real library instead.
+Expected: **854 passed, 2 skipped** on the `pydsl` branch with the local
+audit corpus present (407 on `main`, which does not carry the dialect,
+lints, ranking, history or envelope work). On a fresh clone the two
+envelope-corpus tests skip as well (**852 passed, 4 skipped**): they
+verify the cube-turn regression and replay every DSL reply in
+`scratch\base\audit`, which is local and git-ignored. The two other skips
+are the opt-in live model calls. When `scratch\base\Media` is absent,
+`tests\conftest.py` generates a small, deterministic media tree and points
+`HARNESS_MEDIA_ROOT` at it. If you have the real runtime, the tests index the
+real library instead.
 
 Static check of every Squeak source file:
 

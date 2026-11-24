@@ -112,7 +112,9 @@ def _assert_roundtrip(payload: dict) -> None:
     original = [Change.from_dict(change) for change in payload["changes"]]
     text = render_changeset(payload)
     assert text.isascii()
-    rendered = transpile(text, _context_for(payload))
+    rendered = transpile(
+        text, _context_for(payload), check_names=False
+    )
     problem = _compare(original, rendered.changes)
     assert problem is None, problem
 
@@ -423,7 +425,9 @@ def test_audit_bundle_corpus_roundtrips():
             render_skips[exc.message] += 1
             continue
         try:
-            rendered = transpile(text, _context_for(data))
+            rendered = transpile(
+                text, _context_for(data), check_names=False
+            )
         except (DSLError, DSLErrors) as exc:
             errors = [exc] if isinstance(exc, DSLError) else exc.errors
             mismatches.append(

@@ -1,7 +1,12 @@
 # Conversation history for the bridge ("chat history + rolling summary")
 
-**Status:** plan, not started. Written 2026-11-23 after the revision-fidelity
-fix, against the 645-test tree, from the audited live sessions of that day.
+**Status:** Phase A + B implemented on `pydsl` (2026-11-23): 30 new tests,
+suite **695 passed, 2 skipped**. The ladder A/B has been run once (dsl only,
+`platformer_chain`; results in `docs/LADDER_RUBRIC.md` section 4); the full
+doodle-jump replay through the image and the json half are still to be run.
+Phase C remains deliberately unbuilt. Written 2026-11-23 after the
+revision-fidelity fix, against the 645-test tree, from the audited live
+sessions of that day.
 **Idea:** give the model its own conversation as context — recent turns
 verbatim, older turns as deterministic one-line summaries — so referential
 requests ("make it *smaller*", "start *lower*") resolve against what was
@@ -10,6 +15,59 @@ change because the model remembers claiming it.
 **Target files:** bridge-side only (`harness/history.py`, `prompts.py`,
 `server.py`, `config.py`, tests, `tools/ladder.py` in phase B). **Zero
 Squeak work, zero wire-protocol changes, zero image changes.**
+
+---
+
+## 0. What landed (2026-11-23)
+
+Phase A and B are implemented. The plan below is left as written; this is the
+as-built summary.
+
+- **Store** - `bridge/src/harness/history.py`: `TurnRecord` (request, summary,
+  notes, up to 3 outline lines, ISO timestamp, compact change counts) and
+  `ConversationHistory` (ring of 24, internally locked). `record_result()` builds
+  the outline from `CompiledChangeSet.change_lines()`, never from the raw change
+  set.
+- **Switch** - `resolve_history()`: `HARNESS_HISTORY` > `[harness] history` >
+  on. The bridge resolves it once in `Bridge.__post_init__`; `history=off`
+  records nothing and renders nothing, and an empty store leaves prompts
+  byte-identical (pinned in `test_budget.py` and `test_history.py`).
+- **Recording** - `Bridge.pending` now carries the request text, and
+  `_take_pending` appends on `#applied` under the state lock. Unacked, failed,
+  cancelled and expired turns never enter history; acknowledgment-only turns
+  (empty `changes`) do, with an empty outline.
+- **Prompt** - `build_user_prompt_with_meta(..., history=...)` inserts the
+  section between request and project context. H0 renders the last 4 turns
+  verbatim plus up to 8 older one-liners; H1 shrinks the verbatim window to 2
+  when the whole prompt does not fit; H2 drops the oldest one-liners one at a
+  time at that compressed window, still before the context ladder. The section
+  also has a 2400-character hard cap (render_history shrinks its verbatim window
+  further if a single section would exceed it). The context ladder and
+  `_hard_user_fit` run after, and hard fit drops history before the targeting
+  surface. Meta records `history_turns`, `history_chars`, `history_dropped`,
+  `history_verbatim`.
+- **Ladder** - each scenario chain keeps one history across its steps (the
+  runner records at its success point), `platformer_chain` gained a referential
+  third rung (`start_lower`), and `-History on|off` runs the A/B. The manifest
+  records the switch.
+- **Tests** - `bridge/tests/test_history.py` (30 tests) plus the ladder wiring
+  tests: record caps, ack gating, failed/unacked turns, H1/H2, hard cap,
+  history-off identity, generator neutrality, meta, `resolve_history`
+  precedence, concurrent record/snapshot, and direct `Agent` wiring.
+
+Open decisions resolved as proposed: 4 verbatim turns, no failed turns, no
+wire-side reset (process lifetime plus the caveat line), no extra per-target
+summary.
+
+**First live A/B (2026-11-23, dsl, `platformer_chain`, 1 run each):** both
+modes applied 3/3 and both resolved the new referential `start_lower` rung with
+real `set_sprite` deltas (no identical re-apply narrated as a change).
+History-on averaged 1.33 attempts and 460.3 completion tokens against 2.0 and
+496.3 with history off; the history section was 1209 chars over 2 turns with
+nothing dropped. That is encouraging but not the deciding measurement: it is
+one run, one mode, bundle level only. The detail and the caveats (including a
+history-off numeric premise the outline format cannot fix) are in
+`docs/LADDER_RUBRIC.md` section 4.
 
 ---
 

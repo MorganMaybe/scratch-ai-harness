@@ -7,7 +7,7 @@ import random
 import time
 from typing import Any
 
-from ..config import ConfigError, ModelConfig
+from ..config import ConfigError, ModelConfig, resolve_stop_sequence
 from .base import BaseProvider, ModelReply, ModelRequest, ProviderError, parse_json_object
 
 try:  # optional at runtime: the mock path must work without the SDK
@@ -183,6 +183,15 @@ class OpenAICompatProvider(BaseProvider):
         # contradict the prompt and the transpiler.
         if request.reply_format != "dsl":
             kwargs["response_format"] = {"type": "json_object"}
+        # A DSL reply ends at its closing fence.  The stop sequence is derived
+        # here (the agent need not set it) and gated on the config flag, which
+        # is OFF by default; ``request.stop`` is an explicit override for
+        # tests/future callers and an empty tuple disables it.  Only sent when
+        # the flag is on and the list is non-empty.
+        if request.reply_format == "dsl" and resolve_stop_sequence():
+            stop = request.stop if request.stop is not None else ("\n```",)
+            if stop:
+                kwargs["stop"] = list(stop)
         # "off" must be sent explicitly.  Omitting the field lets a reasoning
         # model spend the whole completion budget on hidden reasoning and return
         # an empty ``content`` (finish_reason=length), which looks like bad JSON.

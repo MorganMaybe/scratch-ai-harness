@@ -34,6 +34,22 @@ def test_bridge_request_and_applied():
     assert "ai-1" in bridge.agent.registry
 
 
+def test_validation_detail_stays_on_one_wire_safe_line():
+    from harness.server import _validation_detail
+    from harness.validator import ValidationIssue
+
+    detail = _validation_detail(
+        [
+            ValidationIssue("dsl", "line 6: say(first + last)\n  ambiguous +"),
+            ValidationIssue("dsl", "second issue"),
+        ]
+    )
+
+    assert "\n" not in detail
+    assert detail == "dsl: line 6: say(first + last) ambiguous +; dsl: second issue"
+    assert _validation_detail([]) == "invalid change set"
+
+
 def test_bridge_unknown_message():
     bridge = make_bridge()
     try:

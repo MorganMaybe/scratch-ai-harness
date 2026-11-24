@@ -39,8 +39,9 @@ class CompiledChangeSet:
     changes: list[CompiledChange]
     notes: str = ""
 
-    def chat_summary(self) -> str:
-        lines = [self.summary.strip()]
+    def change_lines(self) -> list[str]:
+        """The factual one-line description of every change (no summary/notes)."""
+        lines: list[str] = []
         for change in self.changes:
             name = change.label or change.script_id
             if change.action == "add_script":
@@ -101,6 +102,11 @@ class CompiledChangeSet:
                 lines.append(f"Set the backdrop to {(change.name or stem)!r}{source}.")
             elif change.action == "set_sprite":
                 lines.append(f"Updated the position/size of sprite {change.target!r}.")
+        return lines
+
+    def chat_summary(self) -> str:
+        lines = [self.summary.strip()]
+        lines.extend(self.change_lines())
         if self.notes:
             lines.append(self.notes.strip())
         return "\n".join(lines)

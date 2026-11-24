@@ -217,7 +217,11 @@ def render_example_json(python_source: str, pack_name: str) -> list[dict[str, An
     """
     from harness.dsl import transpile
 
-    changeset = transpile(python_source, setup_context(pack_name))
+    changeset = transpile(
+        python_source,
+        setup_context(pack_name),
+        check_names=False,
+    )
     return list(changeset.to_dict()["changes"])
 
 

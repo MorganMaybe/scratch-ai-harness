@@ -190,8 +190,8 @@ def read_ini(path: Path | None) -> tuple[str | None, dict[str, dict[str, str]]]:
     return default, profiles
 
 
-def _read_harness_generator(path: Path | None) -> str | None:
-    """Read ``[harness] generator`` without touching :func:`read_ini`.
+def _read_harness_option(path: Path | None, key: str) -> str | None:
+    """Read one ``[harness]`` option without touching :func:`read_ini`.
 
     A missing file or section is not an error; a file that exists but cannot be
     parsed is, matching ``read_ini``'s behaviour.
@@ -206,8 +206,12 @@ def _read_harness_generator(path: Path | None) -> str | None:
         raise ConfigError(f"cannot read config {path}: {exc}") from exc
     if not parser.has_section("harness"):
         return None
-    value = (parser.get("harness", "generator", fallback="") or "").strip()
+    value = (parser.get("harness", key, fallback="") or "").strip()
     return value or None
+
+
+def _read_harness_generator(path: Path | None) -> str | None:
+    return _read_harness_option(path, "generator")
 
 
 def resolve_generator(
@@ -230,6 +234,66 @@ def resolve_generator(
             raise ConfigError("generator must be one of: json, dsl")
         return value
     return "json"
+
+
+def _parse_history(value: str) -> bool:
+    lowered = value.strip().lower()
+    if lowered == "on":
+        return True
+    if lowered == "off":
+        return False
+    raise ConfigError("history must be one of: on, off")
+
+
+def resolve_history(
+    config_path: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """HARNESS_HISTORY env > harness.ini [harness] history > on.
+
+    With history off, prompts are byte-identical to the pre-history bridge:
+    nothing is recorded and no section is rendered.
+    """
+    env = os.environ if env is None else env
+    raw_env = (env.get("HARNESS_HISTORY") or "").strip()
+    if raw_env:
+        return _parse_history(raw_env)
+    path = Path(config_path) if config_path is not None else default_config_path()
+    raw_ini = _read_harness_option(path, "history")
+    if raw_ini:
+        return _parse_history(raw_ini)
+    return True
+
+
+def _parse_stop_sequence(value: str) -> bool:
+    lowered = value.strip().lower()
+    if lowered in ("on", "true", "1"):
+        return True
+    if lowered in ("off", "false", "0"):
+        return False
+    raise ConfigError("stop_sequence must be one of: on, true, 1, off, false, 0")
+
+
+def resolve_stop_sequence(
+    config_path: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """HARNESS_STOP_SEQUENCE env > harness.ini [harness] stop_sequence > off.
+
+    The stop sequence is the DSL reply's newline plus closing fence, so the
+    model cannot append anything after the module.  Off by default: the
+    provider derives it for DSL replies only, and flipping it on waits for a
+    live ladder A/B showing it is honoured without hurting prompt caching.
+    """
+    env = os.environ if env is None else env
+    raw_env = (env.get("HARNESS_STOP_SEQUENCE") or "").strip()
+    if raw_env:
+        return _parse_stop_sequence(raw_env)
+    path = Path(config_path) if config_path is not None else default_config_path()
+    raw_ini = _read_harness_option(path, "stop_sequence")
+    if raw_ini:
+        return _parse_stop_sequence(raw_ini)
+    return False
 
 
 def resolve_config(

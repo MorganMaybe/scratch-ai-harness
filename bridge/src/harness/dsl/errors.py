@@ -23,16 +23,29 @@ class DSLError(ValueError):
         line: int | None = None,
         col: int | None = None,
         hint: str | None = None,
+        source: str | None = None,
     ):
         self.message = message
         self.line = line
         self.col = col
         self.hint = hint
+        #: The module text the line number refers to (fence already stripped).
+        #: Optional: ``format()`` stays byte-identical unless a caller asks for
+        #: the quoted line, so existing lint/test output is unchanged.
+        self.source = source
         super().__init__(self.format())
 
-    def format(self) -> str:
+    def format(self, *, include_source: bool = False) -> str:
         prefix = f"line {self.line}: " if self.line is not None else ""
-        text = prefix + self.message
+        snippet = ""
+        if include_source and self.source and self.line is not None:
+            lines = self.source.splitlines()
+            if 1 <= self.line <= len(lines):
+                snippet = lines[self.line - 1].strip()
+        if snippet:
+            text = f"{prefix}{snippet}\n  {self.message}"
+        else:
+            text = prefix + self.message
         if self.hint:
             text += "\n  " + self.hint
         return text

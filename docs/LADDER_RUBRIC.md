@@ -25,6 +25,7 @@ python tools\ladder.py -Runs 3
 # focused passes
 python tools\ladder.py -Runs 1 -Modes dsl
 python tools\ladder.py -Runs 1 -Scenarios platformer_chain,calculator
+python tools\ladder.py -Runs 1 -Scenarios platformer_chain -History off
 ```
 
 Preconditions for live runs:
@@ -46,6 +47,13 @@ What it does:
   stay local), plus `manifest.json` and `summary.json`.
 - Modes are interleaved per run (json then dsl inside every run) so
   endpoint drift does not bias one mode.
+- Each scenario chain carries the bridge's **conversation history** across its
+  steps (the runner records a turn at the same success point as `#applied`),
+  so a referential rung can resolve against what was just said and done.
+  `-History off` runs the same chain stateless; the manifest records which ran.
+  The turn bundle's `prompts/assembly.json` records `history_turns`,
+  `history_chars`, `history_dropped` and `history_verbatim` for the user prompt
+  the model actually saw.
 
 Reading the results:
 
@@ -136,7 +144,7 @@ Honesty notes:
 | 4 | The score is readable (monitor or say-HUD; not spamming say without wait) | bundle |
 | 5 | One clean clicker script, no decorative leftovers (unused sprites/vars) | bundle |
 
-### platformer_chain — platformer, then revision
+### platformer_chain — platformer, then revision, then start_lower
 
 | # | Item | Bundle level? |
 |---|---|---|
@@ -147,6 +155,9 @@ Honesty notes:
 | 5 | A score exists **and something in the game changes it** (the prompt leaves the scoring event open — note what the model chose) | bundle |
 | 6 | revision: the movement script is replaced by id (load_sprite first is ideal; a blind-but-correct replace is acceptable; a duplicate add_script is a fail) | bundle |
 | 7 | revision: jump is observably higher and run observably faster on stage, with the rest of the game intact | stage |
+| 8 | start_lower: the referential words resolve against the remembered state — the platforms actually start lower and/or the player actually shrinks (real change in the platform/spawn or sprite-size values), not an absolute re-derivation that breaks the game | bundle |
+| 9 | start_lower: if nothing needs to change, the reply is an honest acknowledgment; an identical re-apply narrated as a change is a fail (the no-op guard may catch it, but history should stop the attempt) | bundle |
+| 10 | start_lower: the rest of the game survives — no dropped landing/animation/bounds ops, no duplicate scripts | bundle |
 
 The automated half of items 6-7 is `python tools\revision_fidelity.py
 <ladder-session-dir>`: it reports per run whether the revision loaded first,
@@ -154,6 +165,23 @@ hit the bridge's replace echo, or went direct, and diffs the replaced
 scripts' ops against the originals (dropped `touching`/`next_costume`/`set_x`
 is the failure signature this rubric item exists to catch; a flagged
 `set_x(x+4)` -> `change_x(speed_var)` style rewrite is a pass, not a drop).
+
+### History A/B
+
+Run `platformer_chain` (the `start_lower` rung is the point) once with
+`-History on` and once with `-History off`, both modes, and compare:
+
+- applied rate: history-on must be ≥ history-off;
+- the referential rung: on resolves against the remembered values, off is
+  expected to re-derive in the absolute or narrate the status quo as a change;
+- every history-on turn must show `history_chars` under the 2400-character
+  section cap in `prompts/assembly.json`, and `history_dropped` should be 0
+  on a short chain;
+- attempts/tokens are recorded in `summary.json`; a history-on turn that
+  costs an extra repair has to buy a real quality delta to count.
+
+Report the pair in the results log under one dated heading, naming both audit
+directories.
 
 ### calculator (the stress rung)
 
@@ -177,6 +205,7 @@ quotes both.
 ### 2026-11-23 — <profile/model>, 3 runs x both modes
 
 audit dir: scratch\base\audit\ladder\<stamp>
+history A/B: on=<stamp-on>, off=<stamp-off> (platformer_chain)
 flip_verdict: json applied=..., dsl applied=..., avg attempts=...,
               avg completion=..., bad_json=...
 
@@ -191,3 +220,41 @@ flip_verdict: json applied=..., dsl applied=..., avg attempts=...,
 Stage-level observations: ...
 Verdict: (flip / no flip / needs another session)
 ```
+
+### 2026-11-23 - opencode-go/deepseek-v4.1-flash, history A/B (1 run, dsl)
+
+audit dirs: `scratch\base\audit\ladder\ab-history-on` and
+`scratch\base\audit\ladder\ab-history-off` (git-ignored)
+scope: `platformer_chain` only (platformer -> revision -> start_lower), one run
+each, so the first measurement of the referential rung.
+
+| rung           | history on                    | history off                   |
+|----------------|-------------------------------|-------------------------------|
+| platformer     | ok, 1 attempt, 841 compl tok  | ok, 2 attempts, 914 compl tok |
+| revision       | ok, 2 attempts, 434 compl tok | ok, 3 attempts, 485 compl tok |
+| start_lower    | ok, 1 attempt, 106 compl tok  | ok, 1 attempt, 90 compl tok   |
+| **totals**     | **3/3, avg 1.33 att, 460.3**  | **3/3, avg 2.0 att, 496.3**   |
+
+Bundle-level observations:
+
+- `start_lower` resolved referentially in **both** modes: each produced real
+  `set_sprite` deltas (Platform1/Platform2 y and Player size), not an identical
+  re-apply narrated as a change. History-on moved Platform1 -40 -> -60 and
+  Platform2 20 -> 0 and set Player 60 -> 50; history-off moved them -30 px and
+  set Player 60 -> 40.
+- History-on's notes match the applied deltas exactly. History-off narrated
+  "player size reduced from 50 to 40" while the context said 60: a numeric
+  premise history cannot fix, because outlines name scripts and targets, not
+  sprite properties. Do not over-read this one-run delta.
+- History-on's `start_lower` user prompt carried `history_turns=2`,
+  `history_chars=1209`, `history_dropped=0`, well under the 2400 cap. The
+  history-off prompt carried none.
+- The history-off platformer build needed a parse-time gate repair (Player
+  created after its defs); history cannot affect the first turn, so that is
+  model variance, not an A/B result.
+
+Verdict: **no flip decision**. On this single dsl run history-on is not worse
+on applied rate, attempts or completion tokens, and the referential rung landed
+either way. Still needed: the json half, more runs, and the stage-level replay
+of `start_lower`; the 2026-11-23 doodle-jump replay through the image remains
+the deciding measurement.

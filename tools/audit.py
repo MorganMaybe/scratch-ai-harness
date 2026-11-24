@@ -346,6 +346,35 @@ def _score_entries(
                 if isinstance(item, dict) and item.get("message"):
                     issues[str(item["message"])] += 1
 
+    # Reply-envelope outcomes: recovered turns cost no repairs (the drift rides
+    # advisory warnings) and fatal turns spent a repair on the reply shape.
+    # Counting is per turn, so several attempts never double-count a turn.
+    recovered_turns = 0
+    fatal_turns = 0
+    envelope_actions: Counter[str] = Counter()
+    for entry in entries:
+        turn_name = entry.get("dir") or entry.get("turn")
+        if not turn_name:
+            continue
+        recovered = False
+        fatal = False
+        for path in (directory / str(turn_name) / "attempts").glob("*/meta.json"):
+            meta = _read_json(path, {})
+            if not isinstance(meta, dict):
+                continue
+            actions = meta.get("envelope_actions")
+            if isinstance(actions, list):
+                for action in actions:
+                    if isinstance(action, str) and action:
+                        envelope_actions[action] += 1
+                        recovered = True
+            if meta.get("envelope_fatal"):
+                fatal = True
+        if recovered:
+            recovered_turns += 1
+        if fatal:
+            fatal_turns += 1
+
     payload = {
         "turns": turns,
         "outcomes": dict(outcomes),
@@ -362,6 +391,11 @@ def _score_entries(
         "max_elapsed_ms": max(latencies) if latencies else 0,
         "multi_attempt_turns": multi_attempt,
         "validation_issues": dict(issues.most_common(20)),
+        "envelope": {
+            "recovered_turns": recovered_turns,
+            "fatal_turns": fatal_turns,
+            "actions": dict(envelope_actions.most_common(10)),
+        },
     }
     return payload, outcomes, errors, issues
 
@@ -393,6 +427,19 @@ def _print_score(
         print("validation issues:")
         for message, count in issues.most_common(10):
             print(f"  {count:>3}  {_short(message, 160)}")
+    envelope = payload.get("envelope") or {}
+    recovered = int(envelope.get("recovered_turns") or 0)
+    fatal = int(envelope.get("fatal_turns") or 0)
+    if recovered + fatal > 0:
+        # Only turns with envelope data print, so a JSON-only bundle keeps its
+        # existing output byte-for-byte.
+        detail = ", ".join(
+            f"{_short(text, 80)}={count}"
+            for text, count in (envelope.get("actions") or {}).items()
+        )
+        print(f"envelope:   recovered={recovered} fatal={fatal}")
+        if detail:
+            print(f"  actions:  {detail}")
 
 
 def cmd_score(args: argparse.Namespace) -> int:

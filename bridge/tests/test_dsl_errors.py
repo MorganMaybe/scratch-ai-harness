@@ -4,6 +4,7 @@ import textwrap
 
 from harness.context import ProjectContext, SpriteContext
 from harness.dsl import DSLError, DSLErrors, transpile
+from harness.dsl.envelope import normalize
 
 
 def source(text: str) -> str:
@@ -55,12 +56,30 @@ def test_syntax_error_is_one_line_precise_diagnostic():
     assert "Reply with one fenced python block" in error.format()
 
 
-def test_prose_before_a_fence_is_a_syntax_error():
-    assert_diagnostic(
-        'Here is the code:\n```python\n@on_flag(target="S")\n'
-        "def f():\n    move(1)\n```",
-        "Python syntax error",
-        1,
+def test_prose_before_a_fence_is_recovered():
+    reply = (
+        "Here is the code:\n"
+        "```python\n"
+        '@on_flag(target="S")\n'
+        "def f():\n"
+        "    move(1)\n"
+        "```"
+    )
+
+    changeset = transpile(reply)
+    assert changeset.changes[0].body[0].to_dict() == {
+        "op": "move",
+        "args": {"steps": 1},
+    }
+
+    normalized = normalize(reply)
+    assert normalized.fatal is None
+    assert normalized.module_text == (
+        '@on_flag(target="S")\ndef f():\n    move(1)'
+    )
+    assert (
+        "skipped 1 line of prose before the opening fence"
+        in normalized.actions
     )
 
 
@@ -356,6 +375,34 @@ def test_ambiguous_plus_is_rejected():
         body("say(first + last)"),
         "'+' between two computed values is ambiguous",
         3,
+    )
+
+
+def test_ambiguous_plus_names_both_explicit_rewrites():
+    error = assert_diagnostic(
+        body("say(first + last)"),
+        "'+' between two computed values is ambiguous",
+        3,
+    )
+
+    assert "first + last" in error.message
+    assert "add(first, last)" in error.message
+    assert "join(first, last)" in error.message
+
+
+def test_source_quoting_puts_the_offending_line_before_the_message():
+    error = assert_diagnostic(
+        body("say(first + last)"),
+        "'+' between two computed values is ambiguous",
+        3,
+    )
+
+    quoted = error.format(include_source=True)
+    assert quoted.startswith("line 3: say(first + last)")
+    assert "\n  '+' between two computed values is ambiguous" in quoted
+    # The default stays byte-identical for lint, tests and old callers.
+    assert error.format().startswith(
+        "line 3: '+' between two computed values is ambiguous"
     )
 
 

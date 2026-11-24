@@ -7,12 +7,21 @@
 [model]
 default=opencode-go
 
-# Reply generator. Default json; HARNESS_GENERATOR overrides this value.
-#   json - the model returns the JSON change-set object (current default)
-#   dsl  - the model returns one fenced Scratch-Python module, which the
-#          bridge transpiles into the same change set
+# Reply generator, conversation memory and stop sequence. HARNESS_GENERATOR /
+# HARNESS_HISTORY / HARNESS_STOP_SEQUENCE override these values.
+#   generator=json - the model returns the JSON change-set object (current default)
+#   generator=dsl  - the model returns one fenced Scratch-Python module, which the
+#                    bridge transpiles into the same change set
+#   history=on     - include acked turns in the prompt (default)
+#   history=off    - stateless prompts, byte-identical to the pre-history bridge
+#   stop_sequence=off - (dsl only) send a stop sequence after the closing fence,
+#                       so the model cannot append prose; flip on only after a
+#                       live ladder A/B shows the provider honours it without
+#                       hurting prompt caching
 # [harness]
 # generator=json
+# history=on
+# stop_sequence=off
 
 [profile:opencode-go]
 # The verified live path (oc_sk_ key).

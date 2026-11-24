@@ -478,6 +478,7 @@ class Agent:
         max_repairs: int = 2,
         cancel_token: CancelToken | None = None,
         audit: Any = None,
+        history: Any = None,
     ):
         self.llm = llm
         self.context = context
@@ -491,6 +492,11 @@ class Agent:
         #: ``Any`` so this module has no dependency on the audit writer and
         #: tests can pass a simple recording double.
         self.audit = audit
+        #: Optional ``harness.history.ConversationHistory``.  The bridge shares
+        #: one instance per process and records on ``#applied``; the ladder
+        #: runner records at its own success point.  ``None`` renders exactly
+        #: the pre-history prompt.
+        self.history = history
 
     def use_context(self, context: ProjectContext) -> None:
         """Adopt the context sent by the image and rebuild the registry from it.
@@ -690,7 +696,7 @@ class Agent:
         context_loads = 0
         system = self._system_prompt(loaded_packs, loaded_sprites, generator)
         user, user_meta = build_user_prompt_with_meta(
-            request, self.context, generator=generator
+            request, self.context, generator=generator, history=self.history
         )
         if self.audit is not None:
             system_info = analyze_system_prompt(system)
@@ -712,6 +718,13 @@ class Agent:
         # Repairs are capped separately from model calls so a lazy context load
         # does not silently consume a repair attempt.
         repairs_used = 0
+        #: Repairs spent on parse/format/context failures ("non-validation").
+        #: A validation failure that lands after at least one of these earns one
+        #: extra repair (see the shared repair decision below); a turn whose
+        #: budget went entirely to validation failures keeps the normal cap.
+        non_validation_repairs_used = 0
+        #: The extra validation repair is granted at most once per turn.
+        extra_validation_repair_used = False
         #: One replace echo per turn.  After it, a still-blind resubmission is
         #: applied as-is so a model that ignores the bodies cannot loop.
         echo_used = False
@@ -724,6 +737,18 @@ class Agent:
         for attempt in range(
             1, self.max_repairs + 3 + _MAX_CONTEXT_LOADS + 1
         ):
+            #: What this attempt failed on: "validation" when the failure came
+            #: from ``validate_changeset``, "parse" for anything else, "none"
+            #: while the attempt is still in flight.  The extra validation
+            #: repair hangs off this, so it must reset for every attempt.
+            failure_kind = "none"
+            #: Reply-envelope facts for this attempt's DSL reply.  Recoveries
+            #: (prose around the fence, notes after the close, ...) cost no
+            #: repairs and only surface as warnings on a success; they reset
+            #: every attempt so drift from a failed reply never leaks into a
+            #: later success or into the audit of a different attempt.
+            dsl_envelope_actions: tuple[str, ...] = ()
+            dsl_envelope_fatal = False
             # Before every model attempt (including the first one).
             _raise_if_cancelled(token)
             left = remaining_seconds(deadline)
@@ -780,9 +805,11 @@ class Agent:
                     fragment_mode = False
                 else:
                     last_payload = None
+                failure_kind = "parse"
                 if repairs_used >= self.max_repairs:
                     break
                 repairs_used += 1
+                non_validation_repairs_used += 1
                 _raise_if_cancelled(token)
                 if generator == "dsl":
                     user = _dsl_repair_prompt(
@@ -818,16 +845,38 @@ class Agent:
                 if json_fallback is not None:
                     reply = replace(reply, data=json_fallback)
                 else:
-                    from .dsl import DSLError, DSLErrors, transpile
+                    from .dsl import DSLError, DSLErrors, envelope, transpile
 
                     dsl_source = raw
                     fragment_mode = False
-                    try:
-                        dsl_changeset = transpile(raw, self.context)
-                    except DSLErrors as exc:
-                        dsl_diagnostics = [error.format() for error in exc.errors]
-                    except DSLError as exc:
-                        dsl_diagnostics = [exc.format()]
+                    # Normalize the reply shape before parsing: recoverable
+                    # envelope drift is recorded as advisory actions (zero
+                    # repairs, surfaced on success) and an unrecoverable shape
+                    # becomes one fatal diagnostic the repair loop can quote.
+                    norm = envelope.normalize(raw)
+                    dsl_envelope_actions = norm.actions
+                    dsl_envelope_fatal = norm.fatal is not None
+                    if norm.fatal is not None:
+                        dsl_diagnostics = [
+                            norm.fatal.format(include_source=True)
+                        ]
+                    else:
+                        try:
+                            dsl_changeset = transpile(raw, self.context)
+                        except DSLErrors as exc:
+                            dsl_diagnostics = [
+                                error.format(include_source=True)
+                                for error in exc.errors
+                            ]
+                        except DSLError as exc:
+                            dsl_diagnostics = [exc.format(include_source=True)]
+                    # ``transpile`` can also report a reply-shape failure (a
+                    # prose-only reply) through the same envelope marker; both
+                    # shapes are envelope fatals for audit and scoring.
+                    dsl_envelope_fatal = dsl_envelope_fatal or any(
+                        envelope.ENVELOPE_PREFIX in diagnostic
+                        for diagnostic in dsl_diagnostics
+                    )
 
             # Lazy context: a reply may ask for optional topic docs and/or exact
             # sprite script bodies instead of a change set. Load them, rebuild
@@ -911,9 +960,11 @@ class Agent:
                         parse_error=str(context_issue),
                         issues=last_issues,
                     )
+                failure_kind = "parse"
                 if repairs_used >= self.max_repairs:
                     break
                 repairs_used += 1
+                non_validation_repairs_used += 1
                 _raise_if_cancelled(token)
                 user = _context_error_prompt(request, self.context, last_issues)
                 continue
@@ -956,10 +1007,14 @@ class Agent:
                         parse_error="; ".join(dsl_diagnostics),
                         issues=last_issues,
                         dsl_errors=dsl_diagnostics,
+                        envelope_actions=list(dsl_envelope_actions),
+                        envelope_fatal=dsl_envelope_fatal,
                     )
+                failure_kind = "parse"
                 if repairs_used >= self.max_repairs:
                     break
                 repairs_used += 1
+                non_validation_repairs_used += 1
                 _raise_if_cancelled(token)
                 user = _dsl_repair_prompt(
                     request, self.context, dsl_source or "", last_issues
@@ -984,6 +1039,14 @@ class Agent:
                 except Exception as exc:
                     fragment_error = exc
                     last_issues = [ValidationIssue("json", str(exc))]
+                # A fragment reply that could not be parsed is a format failure;
+                # one that parsed but failed validation is a validation failure.
+                # This classification stays diagnostic: fragment refinement has
+                # its own repair decision below and never earns the extra
+                # validation repair.
+                failure_kind = (
+                    "parse" if fragment_error is not None else "validation"
+                )
                 guard, merged, noop_warnings = (
                     self._noop_action(
                         request, merged, generator, noop_guard_used
@@ -1058,6 +1121,12 @@ class Agent:
                     )
                 if merged is not None:
                     last_payload = merged.to_dict()
+                # Fragment refinement keeps the normal cap.  The full change set
+                # was already validated on the attempt that entered fragment
+                # mode, so this is an ordinary validation/refinement loop, not
+                # the "full set failed validation after non-validation repairs"
+                # case that earns the extra repair.  A fragment parse failure is
+                # likewise not counted as a non-validation repair.
                 if repairs_used >= self.max_repairs:
                     break
                 repairs_used += 1
@@ -1102,6 +1171,8 @@ class Agent:
                         echo_sprites=echo.sprites if echo is not None else None,
                         noop_guard=guard is not None,
                         noop_sprites=guard.sprites if guard is not None else None,
+                        envelope_actions=list(dsl_envelope_actions),
+                        envelope_fatal=dsl_envelope_fatal,
                     )
                 if not last_issues:
                     if guard is not None:
@@ -1117,7 +1188,17 @@ class Agent:
                     compiled = compile_changeset(
                         changeset, self.context, self.registry
                     )
-                    warnings = self._lint(changeset) + noop_warnings
+                    # Recovered envelope shapes cost zero repairs, so they ride
+                    # the success as advisory warnings (the server prefixes
+                    # "warning: "); audit keeps the structured fields.
+                    warnings = (
+                        [
+                            f"reply envelope: {action}"
+                            for action in dsl_envelope_actions
+                        ]
+                        + self._lint(changeset)
+                        + noop_warnings
+                    )
                     if self.audit is not None:
                         self.audit.write_compiled(changeset, compiled)
                         self.audit.write_chunks(changeset, compiled)
@@ -1137,12 +1218,15 @@ class Agent:
                         cached_tokens=reply.cached_tokens,
                         lint_warnings=warnings,
                     )
+                # Only a failing change set reaches here; a clean one returned.
+                failure_kind = "validation"
             else:
                 last_payload = reply.data
                 fragment_base = None
                 fragment_indices = []
                 parsed: ChangeSetParseResult = parse_changeset_partial(reply.data)
                 if parsed.top_level_error is not None:
+                    failure_kind = "parse"
                     last_issues = [
                         ValidationIssue("json", str(parsed.top_level_error))
                     ]
@@ -1155,6 +1239,7 @@ class Agent:
                             issues=last_issues,
                         )
                 elif parsed.problems:
+                    failure_kind = "parse"
                     last_issues = [
                         ValidationIssue(f"changes[{index}]", str(error))
                         for index, error in parsed.problems
@@ -1246,6 +1331,8 @@ class Agent:
                             cached_tokens=reply.cached_tokens,
                             lint_warnings=warnings,
                         )
+                    # A parse-clean set that failed validation.
+                    failure_kind = "validation"
                     indices = _issue_change_indices(last_issues)
                     if (
                         generator == "json"
@@ -1258,8 +1345,27 @@ class Agent:
                         fragment_notes = changeset.notes
 
             if repairs_used >= self.max_repairs:
-                break
+                # A full change set or module that fails validate_changeset gets
+                # one extra repair when the budget was spent on non-validation
+                # failures (parse, JSON format, context channel): those attempts
+                # never reached validation, so sending the change-set errors
+                # back is new information rather than an extension of an
+                # ordinary validation loop.  A turn whose repairs were all
+                # validation failures keeps the normal cap; fragment refinement
+                # never reaches this decision (see above), and the extra is
+                # granted at most once.
+                if (
+                    failure_kind == "validation"
+                    and non_validation_repairs_used > 0
+                    and not extra_validation_repair_used
+                    and self.max_repairs > 0
+                ):
+                    extra_validation_repair_used = True
+                else:
+                    break
             repairs_used += 1
+            if failure_kind != "validation":
+                non_validation_repairs_used += 1
             # Before each repair (the next loop iteration also re-checks).
             _raise_if_cancelled(token)
             if dsl_source is not None:
@@ -1516,6 +1622,12 @@ wait is a normal block at the end of the surrounding body list; it is
 never a named field of if/forever/repeat_until. Re-emit the failing block with
 the nested blocks inside the body.
 """
+    sprite_name_note = ""
+    if any("is a Scratch menu value" in str(issue) for issue in issues):
+        sprite_name_note = """
+A sprite cannot be named edge, mouse-pointer or Stage: edge and mouse-pointer
+are Scratch menu values and Stage is the backdrop. Choose a different name.
+"""
     return f"""Your previous response was not a valid change set.
 
 User request:
@@ -1529,7 +1641,7 @@ Previous response:
 
 Problems:
 {problems}
-{budget_note}{media_note}{var_note}{scope_note}{delta_note}{target_note}{menu_note}{stage_note}{block_note}
+{budget_note}{media_note}{var_note}{scope_note}{delta_note}{target_note}{menu_note}{stage_note}{block_note}{sprite_name_note}
 Return a corrected JSON change set only. Keep the same schema and use only the
 block ops in the catalog. Do not repeat the previous mistakes.
 """
@@ -1576,6 +1688,55 @@ The Stage cannot run motion, looks or sprite-only sensing blocks. Move that
 behavior to a sprite script, or use the stage-safe equivalents: switch_backdrop,
 variables, broadcast. See the Stage rules in the system prompt.
 """
+    plus_note = ""
+    if any("between two computed values" in str(message) for message in messages):
+        plus_note = """
+The transpiler never inspects the project to guess types. Arithmetic between
+two computed values needs an explicit reporter, including on the right of an
+assignment: rewrite `a + b` as `add(a, b)` for numbers or `join(a, b)` for
+text, `a - b` as `subtract(a, b)`, `a * b` as `multiply(a, b)`, and `a / b` as
+`divide(a, b)`. A literal on one side (`px + 6`, `vy - 1`) is fine; the exact
+quoted line is not. Do not leave a flagged line unchanged.
+"""
+    duplicate_note = ""
+    if any(
+        "already exists; reuse it" in str(message) for message in messages
+    ):
+        duplicate_note = """
+A variable or list listed in the project context, or created earlier in the
+module, already exists. Remove the flagged create_variable/create_list line
+and reuse the name; assign existing variables inside the script (name = value)
+and pass existing lists by name. Do not re-create it.
+"""
+    sprite_name_note = ""
+    if any(
+        "menu value" in str(message)
+        or "cannot be named 'Stage'" in str(message)
+        for message in messages
+    ):
+        sprite_name_note = """
+Sprite names cannot be Stage, edge or mouse-pointer: the last two are Scratch
+menu words used by touching/goto. Choose a normal name such as Wire, Frame or
+EdgeLine.
+"""
+    existing_sprite_note = ""
+    if any(
+        "sprite '" in str(message) and "already exists" in str(message)
+        for message in messages
+    ):
+        existing_sprite_note = """
+That sprite already exists. Use set_sprite() to change it, or choose a
+different name for the new sprite.
+"""
+    menu_note = ""
+    if any("must be one of" in str(message) for message in messages):
+        menu_note = """
+Menu arguments take the exact listed value as a quoted string (for example
+rotation_style="left-right", key_pressed("space"),
+play_drum("1 (Snare Drum)", 0.1)). Drums and instruments also accept their
+integer index (play_drum(1, 0.1), set_instrument(5)). Fix the exact quoted
+line; do not resend the same module unchanged.
+"""
     return f"""Your previous Scratch-Python module could not be used.
 
 User request:
@@ -1589,9 +1750,9 @@ Previous module:
 
 Problems:
 {problems}
-{media_note}{var_note}{target_note}{stage_note}
+{media_note}{var_note}{target_note}{stage_note}{plus_note}{duplicate_note}{sprite_name_note}{existing_sprite_note}{menu_note}
 Return the complete corrected module as ONE fenced python block. Fix every
-quoted line and keep the valid defs and module calls unchanged; do not switch
+quoted line and keep the other defs and module calls unchanged; do not switch
 to a JSON change set. Use only the dialect functions in the API reference.
 
 Control-channel replies stay JSON: when you need more context, return only
