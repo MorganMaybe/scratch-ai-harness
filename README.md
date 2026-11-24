@@ -262,3 +262,12 @@ For what's done, what's missing and what I'd do next, see
 [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 This is started out as spite now its turned into a whole thing and i think i need to curb my drinking problem. if that happens then this repo will get less active. what im saying is its my main personal project right now.
+
+## What's new in 0.2.0
+
+- Scratch-Python front end: `generator = dsl` in `bridge\harness.ini` (or `run_live.ps1 -Generator dsl`). JSON is still the default.
+- The bridge remembers the last 24 turns, so follow-ups like "make it smaller" resolve against the chat. Turn it off with `run_live.ps1 -History off`.
+- Sloppy model replies are recovered mechanically, and repair prompts quote the bad line.
+- 852 tests pass on a fresh clone.
+- No new zip: `git pull` and keep the 0.1.0 runtime.
+- Details in [`RELEASE_NOTES.md`](RELEASE_NOTES.md) and the current state in [`HANDOFF.md`](HANDOFF.md).
