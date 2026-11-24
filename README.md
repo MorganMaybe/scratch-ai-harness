@@ -10,9 +10,10 @@ this is a fork of [Scratch 1.4](https://github.com/scratchfoundation/Scratch_1.4
 ## What it does
 
 - A Chat / Bridge / Usage rail slapped on the right side of the real Scratch window, using the scratch UI design.
-- The model replies with a JSON description of blocks. Python checks it, compiles it into native Scratch block tuples, and Squeak builds `BlockMorph` stacks out of them.
+- The model replies with a JSON description of blocks (or a checked Python subset in `dsl` mode). Python checks it, compiles it into native Scratch block tuples, and Squeak builds `BlockMorph` stacks out of them.
 - It can add, replace and delete scripts, variables, lists, sprites, costumes, backdrops and stage scripts.
 - Every request carries the current project: sprites, scripts, ownership and media, with a few optional context packs that are the main thing im building and improving on now.
+- The bridge also remembers the last 24 applied turns of the chat, so follow-ups like "make it smaller" resolve against what was just made. Turn it off with `run_live.ps1 -History off`.
 - Undo reverts the last change set, without touching blocks you made.
 - Sends run in the background, with a Stop button. There's token usage on the Usage page, and an opt-in audit log for figuring out why a model turn went wrong.
 
@@ -185,7 +186,7 @@ Scratch image (Morphic)                     Python bridge (asyncio)
         +-- undo / registry                  +-- model provider (OpenAI-compatible)
 ```
 
-Every request carries a full project snapshot. The model never sees Python or Smalltalk. It emits a JSON block change set, and validation runs against the live project, so undo and manual edits get reconciled on the next turn.
+Every request carries a full project snapshot. The model never sees Python or Smalltalk. It emits a JSON block change set (or a Scratch-Python module in `dsl` mode — see below), and validation runs against the live project, so undo and manual edits get reconciled on the next turn.
 This is a blessing and a curse. mostly a curse. it doesn’t really know what its doing with that. im still tuning it, might change the whole process of doing that if i get some good liquor in.
 
 There is a second reply format: with `generator = dsl` (in `bridge/harness.ini`
@@ -252,16 +253,15 @@ run_scratch.ps1          launch a dev image (control server)
 ## Status
 
 The end-to-end loop has been run live: chat → project context → bridge →
-validate → apply real blocks → reply → undo. The Python suite has 407 offline
-tests and 2 opt-in live tests, and it passes on a fresh clone. CI runs on
+validate → apply real blocks → reply → undo. The Python suite has 852
+passing tests on a fresh clone (854 with the local audit corpus), plus
+2 opt-in live tests. CI runs on
 Windows and Linux with Python 3.11 and 3.13, and it's green. The static `.st`
 check runs there too.
 
 For what's done, what's missing and what I'd do next, see
 [`HANDOFF.md`](HANDOFF.md). Release history is in
 [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
-
-This is started out as spite now its turned into a whole thing and i think i need to curb my drinking problem. if that happens then this repo will get less active. what im saying is its my main personal project right now.
 
 ## What's new in 0.2.0
 
@@ -271,3 +271,5 @@ This is started out as spite now its turned into a whole thing and i think i nee
 - 852 tests pass on a fresh clone.
 - No new zip: `git pull` and keep the 0.1.0 runtime.
 - Details in [`RELEASE_NOTES.md`](RELEASE_NOTES.md) and the current state in [`HANDOFF.md`](HANDOFF.md).
+
+This is started out as spite now its turned into a whole thing and i think i need to curb my drinking problem. if that happens then this repo will get less active. what im saying is its my main personal project right now.
