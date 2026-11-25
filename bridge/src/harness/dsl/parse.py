@@ -285,6 +285,134 @@ def _media_error(exc: MediaError, line: int | None) -> DSLError:
     return DSLError(message, line=line, hint=hint)
 
 
+
+#: Reporters whose value is always a number / always text.  They let ``+``
+#: pick ``add`` or ``join`` from the expression itself, exactly as a literal
+#: operand already does; reporters typed ``any`` (``answer``, ``list_item``,
+#: ``attribute_of``) stay unknown.
+NUMERIC_REPORTERS: frozenset[str] = frozenset(
+    {
+        "x_position", "y_position", "direction", "backdrop_number",
+        "costume_number", "size", "volume", "tempo", "mouse_x", "mouse_y",
+        "distance_to", "timer", "current", "days_since_2000", "loudness",
+        "add", "subtract", "multiply", "divide", "mod", "round", "abs",
+        "sqrt", "math_function", "random", "string_length", "list_length",
+        "list_item_number",
+    }
+)
+TEXT_REPORTERS: frozenset[str] = frozenset(
+    {"costume_name", "backdrop_name", "username", "join", "letter_of"}
+)
+
+#: Python builtins that are the identity on a Scratch value (Scratch values
+#: are dynamically typed, so a conversion changes nothing at runtime).
+_IDENTITY_BUILTINS: frozenset[str] = frozenset({"str", "float"})
+
+
+def _static_kind(node: ast.AST, variables: dict[str, str]) -> str:
+    """``"num"``, ``"text"`` or ``""`` (unknown) for one expression."""
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool):
+            return ""
+        if isinstance(node.value, (int, float)):
+            return "num"
+        if isinstance(node.value, str):
+            return "text"
+        return ""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return "num"
+    if isinstance(node, ast.BinOp):
+        if not isinstance(node.op, ast.Add):
+            return "num"
+        left = _static_kind(node.left, variables)
+        right = _static_kind(node.right, variables)
+        if "text" in (left, right):
+            return "text"
+        if "num" in (left, right):
+            return "num"
+        return ""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        name = node.func.id
+        if name in NUMERIC_REPORTERS:
+            return "num"
+        if name in TEXT_REPORTERS:
+            return "text"
+        if name in _IDENTITY_BUILTINS and len(node.args) == 1:
+            return "text" if name == "str" else "num"
+        return ""
+    if isinstance(node, ast.Name):
+        return variables.get(node.id, "")
+    return ""
+
+
+def _variable_kinds(module: ast.Module) -> dict[str, str]:
+    """Infer ``num``/``text`` per variable from this module's own evidence.
+
+    Evidence: assignments whose value has a static kind, augmented
+    assignments (``+=``/``-=``/``*=`` ... with a numeric value), ordered
+    comparisons (``x < 5``) and an explicit numeric/text ``initial=`` on
+    ``create_variable``.  A variable with conflicting evidence stays unknown,
+    so ``+`` between two such names is still the ambiguous-``+`` diagnostic.
+    The project is never inspected: only what this module says.
+    """
+    evidence: dict[str, set[str]] = {}
+
+    def note(name: str, kind: str) -> None:
+        if kind:
+            evidence.setdefault(name, set()).add(kind)
+
+    def resolved() -> dict[str, str]:
+        return {
+            name: next(iter(kinds))
+            for name, kinds in evidence.items()
+            if len(kinds) == 1
+        }
+
+    for node in ast.walk(module):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == "create_variable" and node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    for keyword in node.keywords:
+                        # ``initial=0`` is the signature default that models
+                        # copy reflexively, so it is not evidence of intent.
+                        if keyword.arg == "initial" and not (
+                            isinstance(keyword.value, ast.Constant)
+                            and keyword.value.value == 0
+                        ):
+                            note(first.value, _static_kind(keyword.value, {}))
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            if not isinstance(node.op, ast.Add):
+                note(node.target.id, "num")
+            else:
+                note(node.target.id, _static_kind(node.value, {}))
+        elif isinstance(node, ast.Compare):
+            if any(
+                isinstance(op, (ast.Lt, ast.Gt, ast.LtE, ast.GtE)) for op in node.ops
+            ):
+                for side in [node.left, *node.comparators]:
+                    if isinstance(side, ast.Name):
+                        note(side.id, "num")
+    # Assignments can depend on other variables (``vy = speed * 2`` is
+    # numeric on its own; ``total = a + b`` needs a and b): iterate to a
+    # small fixed point.
+    assigns = [
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+    ]
+    for _ in range(3):
+        known = resolved()
+        before = {name: set(kinds) for name, kinds in evidence.items()}
+        for node in assigns:
+            note(node.targets[0].id, _static_kind(node.value, known))
+        if evidence == before:
+            break
+    return resolved()
+
+
 class _Transpiler:
     """One reply's walk over the AST."""
 
@@ -316,6 +444,8 @@ class _Transpiler:
             context.sprite_names() if context is not None else ()
         )
         self.current_target = ""
+        #: ``num``/``text`` per variable, from this module's own evidence.
+        self.variable_kinds: dict[str, str] = {}
 
     # -- collection ------------------------------------------------------
 
@@ -336,6 +466,7 @@ class _Transpiler:
         return True
 
     def run(self, module: ast.Module) -> ChangeSet:
+        self.variable_kinds = _variable_kinds(module)
         for node in module.body:
             if self._full():
                 break
@@ -1306,15 +1437,35 @@ class _Transpiler:
                     "op": "change_var",
                     "args": {"name": name, "delta": -node.value.value},
                 }
-            raise DSLError(
-                "augmented subtraction only accepts a number literal; write "
-                f"{name} = {name} - expr instead.",
-                line=node.lineno,
-                hint=(
-                    f"use set_var with the subtract block: {name} = {name} - "
-                    "expr"
-                ),
-            )
+            # ``x -= e`` is exactly ``x = x - e``.
+            return {
+                "op": "set_var",
+                "args": {
+                    "name": name,
+                    "value": {
+                        "op": "subtract",
+                        "args": {
+                            "a": {"op": "get_var", "args": {"name": name}},
+                            "b": self._expr(node.value),
+                        },
+                    },
+                },
+            }
+        if type(node.op) in _BINARY_OPERATORS:
+            # ``x *= e`` / ``x /= e`` / ``x %= e`` are exactly ``x = x op e``.
+            return {
+                "op": "set_var",
+                "args": {
+                    "name": name,
+                    "value": {
+                        "op": _BINARY_OPERATORS[type(node.op)],
+                        "args": {
+                            "a": {"op": "get_var", "args": {"name": name}},
+                            "b": self._expr(node.value),
+                        },
+                    },
+                },
+            }
         symbol, block_name = _AUGMENTED_OPERATORS.get(
             type(node.op), ("?", "operator")
         )
@@ -1362,9 +1513,20 @@ class _Transpiler:
                 'list_item(i, "list") with a counter variable and while.',
                 line=_line(call) or node.lineno,
             )
-        if call.keywords or len(call.args) != 1:
+        if call.keywords or len(call.args) not in (1, 2):
             raise DSLError(RANGE2_MESSAGE, line=call.lineno)
-        count = self._expr(call.args[0])
+        if len(call.args) == 2:
+            # ``range(a, b)`` with ``_`` repeats ``b - a`` times.
+            start, stop = call.args
+            if _is_number_constant(start) and _is_number_constant(stop):
+                count = max(0, stop.value - start.value)
+            else:
+                count = {
+                    "op": "subtract",
+                    "args": {"a": self._expr(stop), "b": self._expr(start)},
+                }
+        else:
+            count = self._expr(call.args[0])
         body = self._body(node.body)
         return {"op": "repeat", "args": {"count": count}, "body": body}
 
@@ -1456,6 +1618,13 @@ class _Transpiler:
             if args:
                 block["args"] = args
             return block
+        if (
+            name in _IDENTITY_BUILTINS
+            and len(call.args) == 1
+            and not call.keywords
+        ):
+            # Scratch values are untyped: str(x)/float(x) are just x.
+            return self._expr(call.args[0])
         if name in MODULE_CALL_SPECS:
             raise DSLError(
                 f"{name}() is a module-level change call; it cannot be used "
@@ -1622,7 +1791,14 @@ class _Transpiler:
             if _is_number_constant(node.operand):
                 number = node.operand.value
                 return -number if isinstance(node.op, ast.USub) else number
-            raise DSLError(UNARYMINUS_MESSAGE, line=_line(node))
+            if isinstance(node.op, ast.UAdd):
+                return self._expr(node.operand)
+            # ``-x`` is exactly ``0 - x``: emit the subtract block instead of
+            # spending a repair round trip on the spelling.
+            return {
+                "op": "subtract",
+                "args": {"a": 0, "b": self._expr(node.operand)},
+            }
         raise DSLError(
             "Scratch has no bitwise operators; write 0 - x for a negation.",
             line=_line(node),
@@ -1641,13 +1817,37 @@ class _Transpiler:
             if not _is_scalar_literal(node.left) and not _is_scalar_literal(
                 node.right
             ):
-                raise DSLError(
-                    _ambiguous_plus_message(node), line=_line(node)
-                )
+                left = _static_kind(node.left, self.variable_kinds)
+                right = _static_kind(node.right, self.variable_kinds)
+                if "text" in (left, right):
+                    return {
+                        "op": "join",
+                        "args": {
+                            "a": self._expr(node.left),
+                            "b": self._expr(node.right),
+                        },
+                    }
+                if "num" not in (left, right):
+                    raise DSLError(
+                        _ambiguous_plus_message(node), line=_line(node)
+                    )
             return {
                 "op": "add",
                 "args": {"a": self._expr(node.left), "b": self._expr(node.right)},
             }
+        if isinstance(node.op, ast.Pow) and _is_number_constant(node.right):
+            exponent = node.right.value
+            base = node.left
+            if exponent == 0.5:
+                return {"op": "sqrt", "args": {"n": self._expr(base)}}
+            if exponent in (2, 3) and isinstance(base, (ast.Name, ast.Constant)):
+                # Repeating a plain name or literal is exact; a reporter such
+                # as random() would be evaluated twice, so it stays rejected.
+                value = self._expr(base)
+                result: Any = value
+                for _ in range(int(exponent) - 1):
+                    result = {"op": "multiply", "args": {"a": result, "b": value}}
+                return result
         binary = _BINARY_OPERATORS.get(type(node.op))
         if binary is not None:
             return {

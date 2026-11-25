@@ -1,6 +1,6 @@
 # Scratch AI Harness: handoff
 
-**Date:** 2026-11-24
+**Date:** 2026-11-25
 **Status:** the `pydsl` work is merged into `main`: Scratch-Python front end,
 conversation memory and the reply-envelope layer all landed. 852 offline tests
 pass on a fresh clone (854 with the local audit corpus).
@@ -163,6 +163,76 @@ deterministic one-liners actually losing intent.
 - The testing image's title-bar X triggers a native `Quit?!` confirm and
   hides the window; Cancel restores it. Drive the image via
   `tools\ai_control.py`, not the mouse.
+
+## 1b. Speed and quality pass (2026-11-25)
+
+A code-and-docs audit of the bridge pipeline for blind spots. Offline suite:
+**889 passed, 5 skipped** on a fresh clone. Nothing here has been run live
+yet - the measurement plan is at the end.
+
+**Blind spots found (with evidence):**
+
+1. **Revisions cost 2-3 model calls by design.** The bridge holds every
+   AI-owned script body but only sent an index; the model then spent a
+   `load_sprite` round trip, or replaced blind and paid a replace-echo round
+   trip (session 23 measured ~2-3 extra attempts per revision). Game/clone/3D
+   turns likewise paid a `load_context` round trip - or skipped the pack.
+2. **The prompt cache was defeated every time the project changed.** The
+   per-project sprite index sat in the middle of the system prompt (char
+   ~37.9k of ~79k), so the core appendix and examples after it (~42k chars,
+   ~10k tokens) were re-billed and re-processed on every turn that changed a
+   script, and on every repair/echo attempt after a load.
+3. **The DSL system prompt was 1k chars under its 80k budget** with the full
+   media index, and the sprite index counted against that budget - a growing
+   project silently started trimming the catalog descriptions and examples.
+4. **Follow-up prompts dropped the conversation.** Repairs, the replace echo,
+   the no-op guard and the post-load prompt are rebuilt statelessly and never
+   carried the history section - so "make *it* smaller" lost its referent on
+   exactly the attempt that applies the change.
+5. **The post-load prompt contradicted DSL mode** ("return the JSON change set
+   now"), and the context-error prompt asked for a JSON change set too.
+6. **The DSL appendix contradicted the transpiler.** It said `x=-100` and
+   `random(-20, 20)` are errors (they always transpiled) and taught `0 - 20`
+   everywhere, so every worked example produced visible `(0 - 20)` subtract
+   blocks; the checklist pushed `wait(0.2)` into every loop (a 5 fps game).
+7. **Exact Python-isms cost a full repair round trip each:** `-vx`,
+   `vy -= g`, `x *= 2`, `range(a, b)`, `str(x)`, `dx ** 2`, and `+` next to a
+   numeric reporter (`y_position() + vy`) or between variables the module
+   itself types (the audited `py = py + vy` that failed three repairs).
+8. **No room to think.** Hidden reasoning is off (correctly, for budget), and
+   nothing invited a visible plan, so the model writes code cold.
+
+**Fixes landed:**
+
+- **Eager context** (`harness/eager.py`, `eager_context = on` by default;
+  `HARNESS_EAGER_CONTEXT`, `run_live.ps1 -EagerContext off`): attempt 1
+  carries the AI-owned bodies that fit a 14k-char budget (sprites named in the
+  request / recent history / the target first) and up to two keyword-routed
+  packs. The lazy protocol stays as the fallback; a habitual `load_*` for
+  already-included context gets one free pointer, not a repair.
+- **Cache-stable system prompt:** the reference (instructions, media, catalog,
+  appendix, examples) is now a byte-identical prefix per generator/target
+  kind; packs, bodies and the lazy index are appended after a
+  `# This turn's project-specific context` marker, outside the budget ladder.
+  Default budget 80k -> 90k for headroom.
+- **History on every attempt** (`_with_history`), and dialect-correct wording
+  on every follow-up prompt.
+- **Zero-cost desugars** in `dsl/parse.py` for the item-7 forms, plus `+`
+  type inference from numeric/text reporters and in-module evidence (two
+  bare names with no evidence are still the ambiguous-`+` diagnostic;
+  `initial=0` is not evidence; the project is never inspected).
+- **Appendix fixes:** negative literals everywhere, the desugars documented,
+  `wait(0.03)` for controls/physics, a `#` comment plan at the top of
+  multi-script modules, and "check the end of the prompt before loading".
+
+**Measure next (live, `-Audit full`):** the platformer_chain and doodle-jump
+replay with `-EagerContext on` vs `off`: attempts per revision (expect ~1),
+wall time, `cached_tokens` on attempt 2+ and on consecutive turns, dropped
+ops (`tools\revision_fidelity.py`), and whether the model still emits
+`load_*` (it should hit the free pointer, rarely). Then the remaining ideas:
+def-level fragment repair for DSL (resend only failing defs), raising the
+~80-block soft cap for game requests now that the plan-in-comments step
+exists, and streaming validation.
 
 ## 2. Quick start (dev)
 

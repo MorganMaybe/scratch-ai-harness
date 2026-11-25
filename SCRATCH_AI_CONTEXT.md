@@ -25,8 +25,11 @@ inside this harness.
 ## Context packs (load on demand)
 
 The core guide is always included. Specialized detail lives in optional
-**context packs** under `context/`. Before writing blocks, check this list; if a
-pack matches the request, load it first. When you need one, return **only**:
+**context packs** under `context/`. **Check the end of the system prompt
+first:** under "This turn's project-specific context" the bridge often already
+includes the packs the request needs and the exact AI-owned script bodies; use
+those directly. Only if a pack you need is missing, load it first by returning
+**only**:
 
 ```json
 { "load_context": ["clones"], "reason": "the user wants particle clones" }
@@ -210,8 +213,10 @@ fields are rejected.
 | `set_backdrop` | `library`, optional `name`, `select` | Stage only. `select` defaults true. |
 | `set_sprite` | `target`, optional `x y direction size visible rotation_style` | Sprite only (not Stage). Omitted fields stay unchanged. |
 
-Before replacing an AI-owned script whose current body matters, request
-`load_sprite` for its sprite when the detail index lists it; the detail block
+Before replacing an AI-owned script whose current body matters, use its exact
+body when it is already included ("Exact current script bodies are included
+below"); otherwise request `load_sprite` for its sprite when the detail index
+lists it; the detail block
 gives the exact `script_id` and blocks to preserve. If no index is shown, use
 the script ids and metadata from the project context.
 

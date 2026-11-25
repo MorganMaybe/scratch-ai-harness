@@ -676,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
         "--prompt-budget",
         type=int,
         default=0,
-        help="prompt character budget (default: the bridge's own 80000)",
+        help="prompt character budget (default: the bridge's own 90000)",
     )
     parser.add_argument(
         "-DryRun",
