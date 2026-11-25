@@ -19,7 +19,11 @@ guessed. Read the reply contract (section 5) before writing code.
 ## Context packs and script detail (load on demand)
 
 The core guide is always included. Optional **context packs** under `context/`
-add specialized detail. If a pack matches the request, load it first by
+add specialized detail. **Check the end of the system prompt first:** under
+"This turn's project-specific context" the bridge often already includes the
+packs the request needs and the exact bodies of the AI-owned scripts. Anything
+listed there is loaded - use it and answer with the module straight away. Only
+when a pack or a sprite's bodies you need are missing, load them first by
 returning JSON **only** (not a python fence):
 
 ```json
@@ -64,9 +68,10 @@ User scripts are read-only and their bodies are omitted. `load_sprite` and
 `load_context` may be combined, never with a module, and the turn is limited to
 two lazy-context loads.
 
-Before replacing an AI-owned script whose current body matters, return
-`{"load_sprite": ["Name"], "reason": ...}` first; the bridge resends the
-request with that sprite's exact bodies.
+Before replacing an AI-owned script whose current body matters, make sure its
+exact body is in the prompt: it usually already is (see "Exact current script
+bodies are included below"). Only a sprite that is still listed under "Sprite
+script detail available" needs `{"load_sprite": ["Name"], "reason": ...}`.
 
 ---
 
@@ -101,8 +106,8 @@ one with `create_list`, then use the list functions.
 - Stage is 480x360. `x` is roughly `-240..240`, `y` is roughly `-180..180`.
   Sprites may be partly or fully off-stage.
 - Direction is degrees: `90` = right, `0` = up, `180`/`-180` = down, `-90` =
-  left. Because unary minus is rejected, write `270` for left in a module call
-  and `0 - 90` inside a script.
+  left. Negative numbers are ordinary literals everywhere (`x=-100`,
+  `direction=-90`, `goto_xy(-80, -60)`, `random(-20, 20)`).
 - `size` is a **percent**: `100` is natural size. Stay roughly in `5..300`
   unless the task asks otherwise.
 - Rotation styles: `all around`, `left-right`, `don't rotate`. Use
@@ -186,6 +191,11 @@ def patrol():
 
 - Everything goes between the two fences: no "Here is the module:" before the
   opening fence, no commentary after the closing fence.
+- **Plan in comments.** For anything bigger than a one-script change, open the
+  module with 2-8 `#` comment lines: the sprites and what each one does, the
+  variables and who writes them, the broadcasts, and for a revision which
+  behaviours of the current bodies you keep. Comments are free (the bridge
+  ignores them) and they are the only place to think before you write code.
 - `summary()` and `notes()` go INSIDE the fence, at module level.
 - Exactly ONE fenced block. A second block is an error, even an identical copy.
 - A JSON control message is the JSON object alone: no fence, no prose.
@@ -228,9 +238,9 @@ delete_script(script_id)
 - `duplicate_sprite` copies costumes, variables and properties, **not**
   scripts. `delete_sprite` removes an AI-created sprite and its scripts.
   `set_sprite` changes properties at apply time; omitted fields stay unchanged.
-- Negative literals are fine in call arguments (`x=-100`, `random(-20, 20)`,
-  `turn_right(-15)`); unary minus on a computed value is rejected — write
-  `0 - x`. For a left-facing sprite use `direction=270`.
+- Negative literals are fine everywhere, module calls included (`x=-100`,
+  `random(-20, 20)`, `turn_right(-15)`). `-x` on a computed value becomes the
+  `0 - x` subtract block.
 - `=None` in a signature means the argument is optional: omit it. Do not pass
   `None`; the `None` literal itself is rejected.
 - Module-level assignments are not allowed; create variables and lists with
@@ -247,7 +257,7 @@ The decorator names the hat; the function body is the script body.
 def crab1_wander():
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
@@ -288,6 +298,11 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `elif c:` | nested `if` inside `else` |
 | `score = 0` | `set_var("score", 0)` |
 | `score += 1` / `score -= 1` | `change_var("score", 1)` / `change_var("score", -1)` |
+| `vy -= g`, `speed *= 2`, `x /= 2`, `n %= 3` | `set_var` with `subtract`/`multiply`/`divide`/`mod` |
+| `-vx` (computed) | `subtract(0, vx)` |
+| `for _ in range(a, b):` | `repeat` with `count` `b - a` |
+| `dx ** 2` (name or literal), `d ** 0.5` | `multiply(dx, dx)`, `sqrt(d)` |
+| `str(x)`, `float(x)` | `x` (Scratch values are untyped) |
 | bare `score` in an expression | `get_var("score")` |
 | `"Score: " + score` | `join` (a string literal on either side selects `join`) |
 | `a + 1`, `a - 1`, `a * 2`, `a / 2`, `a % 2` | `add`, `subtract`, `multiply`, `divide`, `mod` |
@@ -300,20 +315,24 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `random(1, 10)` | `pick random`; both bounds positional |
 | `sqrt(9)`, `abs(x)`, `round(n)` | the matching Scratch reporter |
 
-- `range(n)` repeats `n` times; the loop variable must be `_`. `range(a, b)` is
-  not supported yet: write `for _ in range(b - a):`.
+- `range(n)` repeats `n` times and `range(a, b)` repeats `b - a` times; the
+  loop variable must be `_` (Scratch `repeat` has no counter - keep your own
+  counter variable when the body needs the index).
 - `while c:` becomes `repeat_until(not c)`, exact because Scratch conditions
   are booleans. Loop counters are variables you initialize before the loop.
-- `+=` accepts an expression; `-=` accepts a number literal only (write
-  `score = score - x` for a reporter).
+- `+=`, `-=`, `*=`, `/=` and `%=` all accept an expression.
 - `not`, `and`, `or`, `if` and `for` are Python keywords: write `not a`,
   `a and b`, `a or b`; never `not(a)`, `and(a, b)` or `if(...)` as calls.
-- Reporters nest freely: `turn_right(random(0 - 20, 20))`,
+- Reporters nest freely: `turn_right(random(-20, 20))`,
   `set_x(x_position() + 5)`, `say("Score: " + score)`.
-- `+` between two computed values is ambiguous and rejected. Write `join(a, b)`
-  for text or `add(a, b)` for numbers. One literal disambiguates: `a + 1` is
-  numeric; `"Score: " + score` is a join. The transpiler never inspects the
-  project to guess a variable's type, so mark every non-literal case yourself.
+- `+` picks `add` or `join` from what it can see: a number literal, a
+  numeric reporter (`y_position()`, `random(...)`, `timer()`, ...) or
+  arithmetic (`vy * 2`) on either side means `add`; a string literal or a text
+  reporter (`join`, `costume_name()`, `letter_of`) means `join`. A bare
+  variable counts when THIS module shows its type (`vy = 0`, `vy -= 1`,
+  `if vy < 3`, `name = "Bob"`). Two bare variables with no such evidence are
+  ambiguous and rejected: write `add(a, b)` or `join(a, b)`. The project is
+  never inspected to guess a type.
 - `==`/`!=` compare as Scratch `equals`. Division is Scratch division; `//` is
   not supported.
 
@@ -328,14 +347,12 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | f-strings (`f"{name}"`) | No f-strings. Use `"a " + name`. | whitelist rejection; use `"a " + name` |
 | `break` / `continue` | No loop break. Use a flag variable and `while not flag:` (or `while flag == 0:` when the condition needs a comparison). | whitelist rejection; use a flag |
 | `pass` | No empty body. Use `wait(0)` or `rest(0.1)`. | whitelist rejection naming the line and construct |
-| unary minus (`-x`, `-20`) | No unary minus. Write `0 - x`. Module args cannot hold `0 - 20`, so use `270` for left and place negative coordinates in a script. | `line {n}: Scratch has no unary minus; write 0 - x.` |
 | chained comparisons (`a < b < c`) | Write `a < b and b < c`. | whitelist rejection; split the comparison |
 | `True` / `False` as conditions | Use `touching(...)`, `key_pressed(...)`, `mouse_down()`, or a comparison (`flag == 1`). | rejection; use a boolean reporter |
 | `None` | No null value. Omit the optional argument or use `0` / `""`. | rejection naming the construct |
-| `**` and `//` | No power or floor-division block. Use `multiply`/`divide` or a repeat loop. | rejection naming the operator |
+| `//`, and `**` other than `name ** 2`/`** 3`/`** 0.5` | No power or floor-division block. Use `multiply`/`divide`/`sqrt` or a repeat loop. | rejection naming the operator |
 | keyword args named like Python keywords | `random(from=1, to=10)` cannot parse. Call `random(1, 10)`. | Python syntax error on that line |
 | `+` between two computed values | Ambiguous. Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.` |
-| `range(a, b)` | Not supported yet. Write `for _ in range(b - a):`. | `line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.` |
 
 Also rejected: using a command as a value (`set_x(move(10))`), calling an
 unknown function (`draw_line(...)`), leaving a reporter alone as a statement
@@ -528,7 +545,6 @@ bullet/particle/tile patterns. The catalog already lists
 | Scratch 2.0 assets local-only | Imported `Scratch2/` media is not open source | Use locally; do not redistribute or suggest downloads |
 | Stage has no motion/say/size/hide | Stage code is background-only | Put visual behavior on sprites |
 | Module args are literals only | Cannot compute a position or name at apply time | Create at defaults, then set it in a green-flag script |
-| Unary minus is rejected | `x=-100` and `random(-20, 20)` are errors | Write `0 - 100` / `random(0 - 20, 20)`; use `270` for left |
 
 If a request truly needs a missing capability, make the best supported
 approximation and note it in `notes(...)`; do not invent a function or menu
@@ -539,7 +555,7 @@ value.
 ## 9. Planning a large task in one prompt
 
 1. **Scene graph.** List backdrops, actors, props, HUD variables, and which
-   scripts each owns. Prefer at most ~80 blocks: code length is the visible
+   scripts each owns - as the `#` comment plan at the top of the module. Prefer at most ~80 blocks: code length is the visible
    budget. If the scene needs more, return a coherent core subset and put the
    rest in `notes(...)`.
 2. **Media and names.** Pick a backdrop and 1-3 costumes per new sprite from
@@ -576,7 +592,7 @@ enemies; do not improvise landing physics without the pack.
 ```python
 @on_flag(target="Crab1", label="reset")
 def crab1_reset():
-    goto_xy(0 - 80, 0 - 60)
+    goto_xy(-80, -60)
     point_in_direction(90)
     set_size(40)
     show()
@@ -589,7 +605,7 @@ def crab1_reset():
 def crab1_wander():
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
@@ -627,7 +643,7 @@ def score_hud():
 def star_caught():
     score += 1
     play_sound("pop")
-    goto_xy(random(0 - 200, 200), random(0 - 140, 140))
+    goto_xy(random(-200, 200), random(-140, 140))
 ```
 
 Only include `play_sound` if the sound name appears in that sprite's `sounds`
@@ -679,31 +695,31 @@ create_sprite("Crab3", costumes=["Animals/crab2.gif"], direction=270, size=45, r
 
 @on_flag(target="Crab1", label="wander")
 def crab1_wander():
-    goto_xy(0 - 100, 0 - 80)
+    goto_xy(-100, -80)
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
 
 @on_flag(target="Crab2", label="wander")
 def crab2_wander():
-    goto_xy(0, 0 - 70)
+    goto_xy(0, -70)
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
 
 @on_flag(target="Crab3", label="wander")
 def crab3_wander():
-    goto_xy(100, 0 - 90)
+    goto_xy(100, -90)
     point_in_direction(270)
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
@@ -713,8 +729,8 @@ notes("Crab3 uses crab2.gif; the costume name is crab2, never crab1.")
 
 The library files are `crab1-a.png`, `crab1-b.png`, `crab2.gif`. There is no
 `crab1.png`/`crab1.gif`; do not create a costume called `crab1` from
-`crab2.gif`. Negative coordinates go in the green-flag script because module
-arguments are literals and unary minus is rejected.
+`crab2.gif`. The green-flag script re-applies the start positions so the scene
+resets on every run.
 
 ### B. Stage backdrop cycle with a timed round
 
@@ -742,7 +758,7 @@ create_sprite("Starfish", costumes=["Animals/starfish1-a.png"], x=0, y=0, direct
 @on_click(target="Starfish", label="caught")
 def starfish_caught():
     score += 1
-    goto_xy(random(0 - 200, 200), random(0 - 140, 140))
+    goto_xy(random(-200, 200), random(-140, 140))
 
 @on_flag(target="Sprite1", label="score_hud")
 def score_hud():
@@ -776,7 +792,9 @@ Before returning the module, check:
 - [ ] Every `+` with two non-literal operands is marked as `add(a, b)` or
       `join(a, b)`; the transpiler does not infer a variable's type from the
       project.
-- [ ] Every `while True:` loop contains a pacing `wait(0.2)`-style call.
+- [ ] Every `while True:` loop yields with a `wait`: `wait(0.03)` for player
+      controls and physics (smooth, ~30 fps), `wait(0.1)`-`wait(0.3)` only for
+      ambient animation such as a wandering crab.
 - [ ] Colors are `#rrggbb` literals; menu values are exact; library paths are
       exact media-index paths with costume names from the file stem.
 - [ ] Only dialect functions are called: no invented functions, no Python
@@ -802,9 +820,7 @@ line {n}: {op}() is a command block; it cannot be used as a value.
 line {n}: {op}() is a reporter; it cannot stand alone - assign it to a variable or nest it inside another call.
 line {n}: unknown variable '{name}'; create it first with create_variable("{name}", ...) or use a name from the project context.
 line {n}: '{name}' is a local variable of sprite '{owner}'; another sprite cannot read it - use attribute_of/set_attribute_of or broadcast to a script owned by {owner}.
-line {n}: Scratch has no unary minus; write 0 - x.
 line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.
-line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.
 line {n}: a script def needs exactly one event decorator, for example @on_flag(target="Sprite1").
 ```
 
@@ -816,12 +832,9 @@ What each means:
 - **unknown variable** - create it earlier, or use a context name.
 - **another sprite's local** - do not copy it. Use `attribute_of`/
   `set_attribute_of`/`change_attribute_of`, or broadcast to that sprite.
-- **unary minus** - write `0 - x`. Module args cannot hold `0 - 20`; use `270`
-  for left and put negative coordinates in a script.
 - **duplicate or reserved name** - reuse an existing variable/list; a sprite
   cannot be named `Stage`, `edge` or `mouse-pointer`.
 - **ambiguous `+`** - write `join(a, b)` or `add(a, b)`.
-- **range(a, b)** - write `for _ in range(b - a):`.
 - **decorator** - every def needs exactly one; a nested/undecorated def should
   become its own script started by `broadcast` + `@on_receive`.
 

@@ -9,6 +9,8 @@ network, key or image.
 
 from __future__ import annotations
 
+import pytest
+
 import importlib.util
 import json
 import sys
@@ -32,6 +34,7 @@ def _load_ladder():
     return module
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_dry_run_ladder_writes_bundles_and_summary(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_GENERATOR", "json")
     ladder = _load_ladder()

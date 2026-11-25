@@ -280,6 +280,7 @@ def test_mixed_turn_strips_the_noop_and_applies_the_rest():
     ]
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_mixed_turn_still_echoes_a_blind_real_replace():
     context = _context_with_body()
     provider = MockProvider(

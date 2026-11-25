@@ -217,10 +217,20 @@ def sprite_detail_text(
     return kept + marker
 
 
-def sprite_detail_index(context: ProjectContext) -> str:
-    """One-line-per-sprite index of blocks that can be loaded on demand."""
+def sprite_detail_index(
+    context: ProjectContext, exclude: "list[str] | tuple[str, ...]" = ()
+) -> str:
+    """One-line-per-sprite index of blocks that can be loaded on demand.
+
+    ``exclude`` names sprites whose bodies are already in the prompt (eagerly
+    or by an earlier load); listing them as loadable would invite a wasted
+    ``load_sprite`` round trip.
+    """
+    skip = {name.casefold() for name in exclude}
     entries: list[str] = []
     for sprite in context.sprites.values():
+        if sprite.name.casefold() in skip:
+            continue
         editable = [
             script for script in sprite.scripts if script.owned and script.tuples
         ]

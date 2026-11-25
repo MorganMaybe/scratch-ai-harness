@@ -21,8 +21,9 @@ PROMPT_BUDGET_ENV = "HARNESS_PROMPT_BUDGET"
 #: Rough character budget used when the environment does not say otherwise.
 #: The system prompt carries the curated media index (up to
 #: ``GROUPED_MEDIA_CHARS``) alongside the full context appendix, so the
-#: default matches the live runner's 80000.
-DEFAULT_PROMPT_BUDGET = 80000
+#: default matches the live runner's 90000 (the stable reference measures
+#: ~80k with the full media index; per-turn context is appended outside it).
+DEFAULT_PROMPT_BUDGET = 90000
 
 #: Always-on prop paths, kept outside the grouped index so trimming cannot
 #: hide them. Shared with the budget fallback that drops them when the
@@ -118,7 +119,8 @@ SYSTEM_PROMPT = """You are the AI programming agent inside Scratch 1.4.
 You turn a natural-language request into a change set of Scratch blocks for the
 current project. The user runs it, then asks you to change it again.
 
-Return ONLY a JSON object. To load optional detail, return
+Return ONLY a JSON object. To load detail missing from the end of this
+prompt, return
 {"load_context": ["name"]} or {"load_sprite": ["SpriteName"]} plus "reason";
 the bridge resends it. Otherwise use this change-set shape:
 {
@@ -156,7 +158,7 @@ Rules:
 - Use only the block ops in the catalog below. Never invent blocks.
 - Use only sprites, variables, costumes, and sounds in the project context.
 - If you need a new variable, add a create_variable change before using it.
-- On revisions, load_sprite only for indexed sprites; never guess a body.
+- On revisions, use included bodies; never guess a body.
 - Change an AI-owned script with replace_script + script_id; use add_script only
   for new behavior or a different hat.
 - On a rebuild, delete obsolete AI-created sprites with delete_sprite; do not
@@ -286,10 +288,12 @@ current project. Write one module of Scratch-Python, a checked subset of Python;
 the bridge transpiles it into the same change set it applies today. The user
 runs it, then asks you to change it again.
 
-Reply with ONE fenced python block and nothing else. To load optional detail,
-return only the JSON shape {"load_context": ["name"]} or
-{"load_sprite": ["SpriteName"]} plus "reason"; the bridge resends the request.
-Control-channel replies stay JSON and are returned alone, never with a module.
+Reply with ONE fenced python block and nothing else. Packs and script bodies
+listed at the end of this prompt are already loaded; use them directly. Only
+for detail that is missing, return only the JSON shape
+{"load_context": ["name"]} or {"load_sprite": ["SpriteName"]} plus "reason";
+the bridge resends the request. Control-channel replies stay JSON and are
+returned alone, never with a module.
 
 Module level is the change set. The module runs top-down, so create things
 before you use them:
@@ -322,10 +326,12 @@ Rules:
   score reads. A variable must exist in the context or be created earlier.
 - The Python you may use is the reference's control flow and calls only: no
   import, class, lambda, comprehension, try, return, global, with, assert,
-  raise, yield, break, continue, pass, f-string, indexing, attribute access,
-  unary minus (write 0 - x) or chained comparison.
+  raise, yield, break, continue, pass, f-string, indexing, attribute access
+  or chained comparison. Negative literals (-90, x=-100) are fine.
 - A command is a statement on its own line; a reporter returns a value and must
   be nested. if/wait_until/repeat_until conditions need a boolean reporter.
+- Open any multi-script module with a few # comment lines planning sprites,
+  variables, broadcasts and (on a revision) which current behaviours you keep.
 - Prefer ~80 blocks. If a scene cannot fit, return a coherent core subset and
   put the rest in notes(); the user can continue. For pen drawings, approximate
   with a few lines or arcs (roughly 30 blocks or fewer), never one block per
@@ -997,6 +1003,29 @@ def build_user_prompt_with_meta(
 ) -> tuple[str, dict[str, Any]]:
     """Build the user prompt and report which trimming stage was used.
 
+    See :func:`build_user_prompt_with_history`, which also returns the
+    conversation section that made it into the prompt.
+    """
+    prompt, meta, _history = build_user_prompt_with_history(
+        request,
+        context,
+        budget_chars=budget_chars,
+        generator=generator,
+        history=history,
+    )
+    return prompt, meta
+
+
+def build_user_prompt_with_history(
+    request: str,
+    context: ProjectContext,
+    *,
+    budget_chars: int | None = None,
+    generator: str = "json",
+    history: Any = None,
+) -> tuple[str, dict[str, Any], str]:
+    """Build the user prompt and report which trimming stage was used.
+
     ``history`` is a :class:`harness.history.ConversationHistory` (or any object
     with a ``snapshot()`` returning records).  Its section is inserted between
     the request and the project context and is trimmed on its own stages
@@ -1044,15 +1073,21 @@ def build_user_prompt_with_meta(
     for history_text, stats in candidates:
         prompt = _user_prompt(request, full_context, tail, history_text)
         if len(prompt) <= budget:
-            return prompt, _user_meta(0, prompt, budget, full_context, history=stats)
+            return (
+                prompt,
+                _user_meta(0, prompt, budget, full_context, history=stats),
+                history_text,
+            )
 
     history_text, stats = candidates[-1]
     for level in (1, 2, 3):
         context_text = _context_text(context, level, generator)
         prompt = _user_prompt(request, context_text, tail, history_text)
         if len(prompt) <= budget:
-            return prompt, _user_meta(
-                level, prompt, budget, context_text, history=stats
+            return (
+                prompt,
+                _user_meta(level, prompt, budget, context_text, history=stats),
+                history_text,
             )
 
     compact = _context_text(context, 3, generator)
@@ -1061,14 +1096,18 @@ def build_user_prompt_with_meta(
     )
     if not used_history:
         stats = HistoryStats(total=stats.total, dropped=stats.total)
-    return prompt, _user_meta(
-        3,
+    return (
         prompt,
-        budget,
-        compact,
-        truncated=True,
-        dropped_chars=dropped,
-        history=stats,
+        _user_meta(
+            3,
+            prompt,
+            budget,
+            compact,
+            truncated=True,
+            dropped_chars=dropped,
+            history=stats,
+        ),
+        history_text if used_history else "",
     )
 
 

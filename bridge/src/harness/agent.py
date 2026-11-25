@@ -16,7 +16,7 @@ from .block_ir import (
     parse_context_request,
 )
 from .changeset import CompiledChangeSet, compile_changeset
-from .config import resolve_generator
+from .config import resolve_eager_context, resolve_generator
 from .context import ProjectContext, ScriptSummary, SpriteContext
 from .context_doc import (
     ContextPackError,
@@ -25,13 +25,14 @@ from .context_doc import (
     load_context_doc,
     load_context_packs,
 )
+from .eager import eager_sprites, suggest_packs
 from .lints import lint_changeset
 from .llm import LLMClient
 from .prompts import (
     analyze_system_prompt,
     build_dsl_system_prompt,
     build_system_prompt,
-    build_user_prompt_with_meta,
+    build_user_prompt_with_history,
     prompt_budget_chars,
 )
 from .providers.base import (
@@ -642,13 +643,15 @@ class Agent:
         sprites: list[str] | None = None,
         generator: str = "json",
     ) -> str:
-        """Build the system prompt with the core appendix and loaded context.
+        """Build the system prompt: a stable, cacheable prefix plus this turn.
 
-        Loaded packs and sprite detail blocks extend the character budget by
-        their own size, so asking for specialized context does not consume room
-        from the core guide, media index or catalog. The sprite index appears
-        only when at least one AI-owned script has a body to show; the exact
-        bodies appear only after the model requests them.
+        The prefix (instructions, media index, catalog, core appendix,
+        examples) depends only on the generator and the target kind, so it is
+        byte-identical across turns and attempts and the provider's prefix
+        cache can serve it.  Everything project- or turn-specific - loaded
+        packs, exact sprite bodies and the lazy sprite index - is appended
+        after it, outside the budget ladder, so it can neither be trimmed nor
+        push the core guide into a trim.
 
         ``generator = dsl`` swaps the dialect appendix and the generated
         Scratch-Python reference in; the control-channel index is unchanged.
@@ -657,24 +660,81 @@ class Agent:
             core = load_context_doc(DEFAULT_DSL_CONTEXT_DOC) or load_context_doc()
         else:
             core = load_context_doc()
-        extra = load_context_packs(packs, generator)
-        detail = self._loaded_sprite_detail(sprites or [], generator)
-        loaded = "\n\n".join(part for part in (extra, detail) if part)
-        index = sprite_detail_index(self.context)
-        budget = prompt_budget_chars()
-        if loaded:
-            # Requested blocks go first so a base-budget trim would keep the
-            # detail the model explicitly asked for; the extra budget then
-            # preserves the normal room for everything else.
-            budget += len(loaded) + 2
-        parts = [part for part in (loaded, index, core) if part]
-        doc = "\n\n".join(parts)
         builder = build_dsl_system_prompt if generator == "dsl" else build_system_prompt
-        return builder(
+        stable = builder(
             target=self.context.target,
-            budget_chars=budget,
-            context_doc=doc,
+            budget_chars=prompt_budget_chars(),
+            context_doc=core,
         )
+        tail = self._turn_context(packs, sprites or [], generator)
+        return stable + ("\n\n" + tail if tail else "")
+
+    def _turn_context(
+        self, packs: list[str], sprites: list[str], generator: str
+    ) -> str:
+        """The per-turn section appended after the stable system prompt."""
+        extra = load_context_packs(packs, generator)
+        detail = self._loaded_sprite_detail(sprites, generator)
+        index = sprite_detail_index(self.context, exclude=sprites)
+        parts: list[str] = []
+        if extra or detail or index:
+            parts.append(
+                "# This turn's project-specific context\n"
+                "(Everything above is the fixed reference; everything below is "
+                "about this project and this request.)"
+            )
+        if extra:
+            parts.append(extra)
+        if detail:
+            loaded = [
+                name
+                for name in (resolve_sprite_name(self.context, s) for s in sprites)
+                if name is not None
+            ]
+            parts.append(
+                "Exact current script bodies are included below for: "
+                + ", ".join(loaded)
+                + ". Use them directly: a replacement keeps the behaviours "
+                "that still matter. Do not load_sprite these sprites."
+            )
+            parts.append(detail)
+        if index:
+            parts.append(index)
+        return "\n\n".join(parts)
+
+    def _eager_context(
+        self, request: str, generator: str
+    ) -> tuple[list[str], list[str]]:
+        """Packs and sprite bodies to include on attempt 1 (see ``eager.py``)."""
+        if not resolve_eager_context():
+            return [], []
+        previous = ""
+        recent_text = ""
+        if self.history is not None:
+            snapshot = getattr(self.history, "snapshot", None)
+            records = snapshot() if callable(snapshot) else []
+            if records:
+                previous = str(getattr(records[-1], "request", "") or "")
+                recent_text = "\n".join(
+                    " ".join(
+                        [str(getattr(record, "request", "") or "")]
+                        + [str(line) for line in getattr(record, "outline", ())]
+                    )
+                    for record in records[-2:]
+                )
+        try:
+            packs = suggest_packs(
+                request, available_context_packs(), previous_request=previous
+            )
+        except Exception:  # pragma: no cover - a broken pack index stays lazy
+            packs = []
+        sprites = eager_sprites(
+            self.context,
+            request,
+            lambda name: self._loaded_sprite_detail([name], generator),
+            recent_text=recent_text,
+        )
+        return packs, sprites
 
     def handle(
         self,
@@ -691,17 +751,23 @@ class Agent:
         # Resolve once per turn so tests (and the smoke runner) can flip the
         # environment between turns without restarting the bridge.
         generator = resolve_generator()
-        loaded_packs: list[str] = []
-        loaded_sprites: list[str] = []
+        # Eager context: the packs the wording points at and the AI-owned
+        # bodies that fit the budget ride attempt 1, so the common revision
+        # and game turns need no load round trip and no replace echo.
+        eager_packs, eager_sprite_names = self._eager_context(request, generator)
+        loaded_packs: list[str] = list(eager_packs)
+        loaded_sprites: list[str] = list(eager_sprite_names)
         context_loads = 0
         system = self._system_prompt(loaded_packs, loaded_sprites, generator)
-        user, user_meta = build_user_prompt_with_meta(
+        user, user_meta, history_text = build_user_prompt_with_history(
             request, self.context, generator=generator, history=self.history
         )
         if self.audit is not None:
             system_info = analyze_system_prompt(system)
             system_info["context_packs"] = list(loaded_packs)
             system_info["sprite_details"] = list(loaded_sprites)
+            system_info["eager_packs"] = list(eager_packs)
+            system_info["eager_sprites"] = list(eager_sprite_names)
             self.audit.write_prompts(
                 system,
                 user,
@@ -732,10 +798,14 @@ class Agent:
         #: current script normally gets one resend offering the two honest
         #: outs; after it, identical replacements are stripped with warnings.
         noop_guard_used = False
+        #: One free pointer when the model asks for context that eager loading
+        #: already included (it costs a model call but never a repair).
+        already_loaded_nudged = False
         attempt = 0
 
         for attempt in range(
-            1, self.max_repairs + 3 + _MAX_CONTEXT_LOADS + 1
+            # +1 for the one free already-loaded pointer.
+            1, self.max_repairs + 3 + _MAX_CONTEXT_LOADS + 1 + 1
         ):
             #: What this attempt failed on: "validation" when the failure came
             #: from ``validate_changeset``, "parse" for anything else, "none"
@@ -767,6 +837,9 @@ class Agent:
                     )
                 raise error
 
+            # Follow-up prompts are rebuilt statelessly; keep the remembered
+            # conversation on every attempt, not only the first.
+            user = _with_history(user, request, history_text)
             try:
                 reply = self._complete(
                     system, user, request_id, attempt, deadline, generator
@@ -936,6 +1009,23 @@ class Agent:
                     context_issue = ValidationIssue(
                         "load_context", "; ".join(problems)
                     )
+                elif (
+                    not new_packs
+                    and not new_sprites
+                    and (eager_packs or eager_sprite_names)
+                    and not already_loaded_nudged
+                ):
+                    # The bridge pre-loaded this context; a model asking for it
+                    # by habit gets one free pointer to it, not a repair.
+                    already_loaded_nudged = True
+                    names = list(context_request.packs) + resolved_sprites
+                    if self.audit is not None:
+                        self.audit.write_attempt(attempt, user_prompt=user, reply=reply)
+                    _raise_if_cancelled(token)
+                    user = _already_loaded_prompt(
+                        request, self.context, names, generator
+                    )
+                    continue
                 elif not new_packs and not new_sprites:
                     context_issue = ValidationIssue(
                         "load_context",
@@ -966,7 +1056,9 @@ class Agent:
                 repairs_used += 1
                 non_validation_repairs_used += 1
                 _raise_if_cancelled(token)
-                user = _context_error_prompt(request, self.context, last_issues)
+                user = _context_error_prompt(
+                    request, self.context, last_issues, generator
+                )
                 continue
             if packs_to_load or sprites_to_load:
                 loaded_packs.extend(packs_to_load)
@@ -975,7 +1067,11 @@ class Agent:
                 fragment_mode = False
                 system = self._system_prompt(loaded_packs, loaded_sprites, generator)
                 user = _context_loaded_prompt(
-                    request, self.context, packs_to_load, sprites_to_load
+                    request,
+                    self.context,
+                    packs_to_load,
+                    sprites_to_load,
+                    generator,
                 )
                 if self.audit is not None:
                     system_info = analyze_system_prompt(system)
@@ -1743,7 +1839,7 @@ User request:
 {request}
 
 Project context:
-{context.summary_text()}
+{context.summary_text("dsl")}
 
 Previous module:
 {raw_source or "(no module)"}
@@ -1861,6 +1957,7 @@ def _context_loaded_prompt(
     context: ProjectContext,
     packs: list[str],
     sprites: list[str] | None = None,
+    generator: str = "json",
 ) -> str:
     loaded: list[str] = []
     if packs:
@@ -1874,10 +1971,56 @@ User request:
 {request}
 
 Project context:
-{context.summary_text()}
+{context.summary_text(generator)}
 
-Use the loaded context where it applies, then return the JSON change set now.
+Use the loaded context where it applies, then {_reply_ask(generator)}
 """
+
+
+def _already_loaded_prompt(
+    request: str,
+    context: ProjectContext,
+    names: list[str],
+    generator: str = "json",
+) -> str:
+    """The answer to a load request for context that is already included."""
+    listed = ", ".join(names) or "the requested context"
+    return f"""Already loaded: {listed}. It is in the system prompt under
+"This turn's project-specific context" (packs and exact current script
+bodies). Do not request it again.
+
+User request:
+{request}
+
+Project context:
+{context.summary_text(generator)}
+
+Use the included context, then {_reply_ask(generator)}
+"""
+
+
+def _reply_ask(generator: str) -> str:
+    """The closing ask of a follow-up prompt, in the turn's reply format."""
+    if generator == "dsl":
+        return "return the Scratch-Python module now, in one fenced python block."
+    return "return the JSON change set now."
+
+
+def _with_history(prompt: str, request: str, history_text: str) -> str:
+    """Carry the turn's conversation section into a follow-up prompt.
+
+    Every follow-up prompt (repairs, context loads, the replace echo, the
+    no-op guard) is stateless and restates ``User request:``; without the
+    section a referential request ("make *it* smaller") loses its referent
+    exactly on the attempt that applies the change.  The section goes right
+    after the request, where the first prompt has it.  Idempotent.
+    """
+    if not history_text or history_text in prompt:
+        return prompt
+    anchor = f"User request:\n{request}\n"
+    if anchor not in prompt:
+        return prompt
+    return prompt.replace(anchor, f"{anchor}\n{history_text}\n", 1)
 
 
 def _has_sprite_detail(context: ProjectContext) -> bool:
@@ -1892,18 +2035,24 @@ def _context_error_prompt(
     request: str,
     context: ProjectContext,
     issues: list[ValidationIssue],
+    generator: str = "json",
 ) -> str:
     problems = "\n".join(f"- {issue}" for issue in issues)
+    answer = (
+        "a Scratch-Python module in one fenced python block"
+        if generator == "dsl"
+        else "a JSON change set"
+    )
     if _has_sprite_detail(context):
         tail = (
-            "Return either a JSON change set, or a lazy-context request naming only\n"
+            f"Return either {answer}, or a lazy-context request naming only\n"
             "available context packs or sprites. Do not combine it with changes."
         )
     else:
         tail = (
             "No sprite script detail is available in this turn. Do not return\n"
             "load_sprite again; use the script ids, labels and block counts in the\n"
-            "project context and return a change set now."
+            f"project context and return {answer} now."
         )
     return f"""Your load_context/load_sprite request was not usable.
 
@@ -1911,7 +2060,7 @@ User request:
 {request}
 
 Project context:
-{context.summary_text()}
+{context.summary_text(generator)}
 
 Problems:
 {problems}

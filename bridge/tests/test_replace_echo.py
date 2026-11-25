@@ -23,6 +23,8 @@ from harness.providers.base import ModelReply, ProviderError
 from harness.smalltalk import Sym
 from harness.validator import ValidationError
 
+pytestmark = pytest.mark.usefixtures("lazy_context")
+
 #: Replaces ``ai-1`` and deliberately changes the body: ``move(10)`` can then
 #: only come from the current-body section of the echo.
 REPLACE_DSL = '''@on_flag(target="Sprite1", label="bounce", script_id="ai-1")

@@ -10,6 +10,7 @@
 #   .\run_live.ps1 -Generator dsl       # model writes Scratch-Python (json|dsl)
 #   .\run_live.ps1 -History off         # disable conversation history
 #   .\run_live.ps1 -StopSequence on     # DSL stop sequence (on|off; default off)
+#   .\run_live.ps1 -EagerContext off    # lazy-only packs/script bodies (default on)
 param(
     [switch]$DebugLog,
     [switch]$Reuse,
@@ -19,7 +20,9 @@ param(
     [ValidateSet("", "on", "off")]
     [string]$History = "",
     [string]$StopSequence = "",
-    [int]$PromptBudget = 80000,
+    [ValidateSet("", "on", "off")]
+    [string]$EagerContext = "",
+    [int]$PromptBudget = 90000,
     [ValidateSet("off", "meta", "full")]
     [string]$Audit = "off",
     [string]$AuditDir = "",
@@ -68,6 +71,9 @@ if ($listener) {
         if ($StopSequence) {
             Write-Host "note: -StopSequence only applies to a newly launched bridge; restart to change it."
         }
+        if ($EagerContext) {
+            Write-Host "note: -EagerContext only applies to a newly launched bridge; restart to change it."
+        }
         exit 0
     }
     throw "port 8765 is already in use: $what`nStop that bridge first, or re-run with -Reuse to use it as-is."
@@ -97,6 +103,9 @@ if ($History) {
 if ($StopSequence) {
     $env:HARNESS_STOP_SEQUENCE = $StopSequence
 }
+if ($EagerContext) {
+    $env:HARNESS_EAGER_CONTEXT = $EagerContext
+}
 Set-Location $bridge
 
 Write-Host "bridge profile: $Profile (key loaded, not shown)"
@@ -105,6 +114,9 @@ if ($Generator) {
 }
 if ($History) {
     Write-Host "conversation history: $History"
+}
+if ($EagerContext) {
+    Write-Host "eager context: $EagerContext"
 }
 if ($StopSequence) {
     Write-Host "stop sequence: $StopSequence"
