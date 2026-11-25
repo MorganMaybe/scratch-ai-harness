@@ -32,10 +32,12 @@ returning JSON **only** (not a python fence):
 ```
 
 The bridge resends with the pack or bodies included. Do not combine these with
-a module; load at most two packs at a time. Packs: `clones` (lifecycle, 300
-limit, bullets/particles/tiles), `games` (score/HUD, game over, platformer and
+a module; load at most two packs at a time. Packs: `clones` (any scene with
+three or more similar things; exact clone semantics, spawners, particles,
+grids, collectibles), `games` (score/HUD, game over, platformer and
 flappy physics), `scrolling` (camera, parallax, tile maps), `pen-3d` (3D
-projection, meshes, pen/frame limits).
+projection, meshes, pen/frame limits), `scenes` (title/menu/play/game-over
+screens driven by a global `scene` number and a `scene_changed` broadcast).
 
 **Loaded packs show block examples in this dialect**, with the same function
 names and argument order as this reference. The JSON blocks you may see in the
@@ -437,11 +439,27 @@ These are the behavior notes it does not express.
   `touching`, `key_pressed`, `mouse_down`, ...). `glide(seconds, x, y)`;
   `wait(seconds)`.
 
-### Clones
+### Clones - the default for "many of the same thing"
 
-See the `clones` pack for lifecycle, limits, clone-aware `touching`, and
-bullet/particle/tile patterns. The catalog already lists
-`create_clone(target)`, `delete_clone()` and `@on_clone_start`.
+Three or more similar actors (crabs, stars, coins, enemies, bricks, trees,
+snowflakes) are **one template sprite plus clones**, not copy-pasted sprites
+with copy-pasted scripts: fewer blocks, one script to revise, and
+`touching("Coin")` sees every clone. Keep separate sprites only for distinct
+characters with their own roles, or when the user asked for named sprites.
+
+The essentials (the `clones` pack has the full semantics and patterns):
+
+- `create_clone("myself")` copies the sprite **at that instant** - position,
+  direction, size, costume, effects, visibility and its local variables. So
+  stamp: move the template, set its locals, then clone; `hide()` the template
+  when it is only a stamp, and `show()` first in `@on_clone_start`.
+- Only `@on_clone_start` scripts start in a new clone, but `@on_receive`,
+  `@on_key` and `@on_click` scripts run in every clone too: never spawn clones
+  from those (one broadcast would double the population).
+- Per-clone state (`speed`, `hp`, `scored`) is a sprite-local variable;
+  globals are shared. A clone tests its own collisions
+  (`if touching("Player"):`) and ends with `delete_clone()`.
+- The green flag deletes every clone; at most 300 live, keep it to tens.
 
 ### Motion (sprites only)
 
@@ -567,17 +585,18 @@ value.
 4. **Coordinate.** Use globals + `broadcast`/`@on_receive` for cross-sprite
    events. Direct `touching`/`distance_to`/`goto_sprite`/`point_towards` may
    name an existing sprite. Give each sprite one clear behavior.
-5. **Initialize.** Every green-flag script should set position, direction,
-   size, visibility, costume and its variables. Negative coordinates go in the
-   script, not the module call.
+5. **Reset.** The green flag must rebuild the start state every time: see
+   "Reset on green flag" in section 10 - pen cleared, every changed sprite put
+   back, every variable and list re-initialized.
 6. **Keep scripts small.** One behavior per script; `while True:` + `wait` for
    continuous motion; `for _ in range(n):` for finite loops. Pen art is a few
    line/arc approximations, not one block per pixel.
 7. **Self-check** section 12. **Return one fenced python block only.**
 
-A useful default: a backdrop `set_backdrop`, 2-4 sprites with one
-`wander`/`patrol` script each, a global `score`, and a stage script only when
-the backdrop must change on a timer.
+A useful default: a backdrop `set_backdrop`, one sprite per distinct role
+(player, enemy type, collectible type), clones for every crowd of the same
+thing, a global `score`, and a stage script only when the backdrop must change
+on a timer.
 
 A **game** request (score, lives, jumping, dodging, enemies, win/lose) should
 load the `games` pack first, plus `clones` when it spawns pipes, bullets or
@@ -587,16 +606,66 @@ enemies; do not improvise landing physics without the pack.
 
 ## 10. Reusable patterns
 
-### Green-flag initialization
+### Reset on green flag (every project, every revision)
+
+The green flag is the user's restart button: the second run must look and
+behave exactly like the first. In Scratch 1.4 **nothing resets by itself**
+except clones (the flag deletes them). Pen trails, position, direction, size,
+costume, visibility, graphic effects, speech bubbles, layer order, variables,
+list contents, the backdrop and the timer all keep whatever the last run - or
+the user's dragging - left behind. So the green flag must reset **every piece
+of state the project changes**:
+
+| The project changes... | The green flag resets it with |
+|---|---|
+| pen trails | `pen_clear()` (once, Stage or the drawing sprite), then `pen_up()` and the pen colour/size before any `pen_down()` |
+| where a sprite is / faces | `goto_xy(x, y)`, `point_in_direction(d)` |
+| size, costume, look | `set_size(p)`, `switch_costume("name")`, `clear_effects()` |
+| visibility | `show()` or `hide()` - explicitly, both ways |
+| speech | `say("")` |
+| draw order | `go_to_front()` / `go_back_layers(n)` when layering matters |
+| variables | `score = 0`, `lives = 3`, `game_over = 0` - every variable any script changes |
+| lists | `delete_from_list("all", "queue")`, then refill |
+| backdrop / timer | `switch_backdrop("start")`, `reset_timer()` (Stage) |
 
 ```python
-@on_flag(target="Crab1", label="reset")
-def crab1_reset():
+@on_flag(target="Stage", label="reset_world")
+def reset_world():
+    pen_clear()
+    switch_backdrop("stars")
+    score = 0
+    game_over = 0
+    reset_timer()
+
+@on_flag(target="Crab", label="crab_run")
+def crab_run():
     goto_xy(-80, -60)
     point_in_direction(90)
     set_size(40)
+    switch_costume("crab1-a")
+    clear_effects()
+    say("")
     show()
+    while True:
+        move(2)
+        bounce()
+        wait(0.1)
 ```
+
+- **Reset at the top of the script that runs the loop**, before
+  `while True:`. Two `@on_flag` scripts of one sprite start together, so a
+  separate reset script races the loop. Reset each global in exactly one place
+  (the Stage's flag script).
+- **The start position lives in the script.** `create_sprite(x=...)` and
+  `set_sprite(...)` place a sprite once, when the change applies; after a run
+  or a drag only the flag script puts it back. On a revision that moves a
+  starting point ("start lower", "put the cat on the left"), change the
+  `goto_xy` in its reset - a `set_sprite` alone is undone by the next green
+  flag.
+- **A revision that adds state adds its reset**: a new variable, effect, pen
+  drawing, costume change or hidden sprite gets its line in the flag script.
+- Pen drawings start with `pen_clear()` unless the request is to keep drawing
+  over earlier runs.
 
 ### Wander with edge bounce and costume animation
 
@@ -683,54 +752,42 @@ def crab1_go():
 
 ## 11. Worked examples
 
-### A. A beach with three correctly labelled crabs
+### A. A beach with three wandering crabs (one sprite, clones)
 
 ```python
+# plan: one Crab template (hidden stamp) -> 3 clones at different spots/sizes
+# local speed is set before each create_clone, so every clone keeps its own
 summary("Added a beach backdrop and three wandering crabs.")
 set_backdrop("Nature/beach-malibu.jpg", select=True)
+create_sprite("Crab", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=40, rotation_style="left-right")
+create_variable("speed", scope="sprite", target="Crab", initial=2)
 
-create_sprite("Crab1", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=40, rotation_style="left-right")
-create_sprite("Crab2", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=35, rotation_style="left-right")
-create_sprite("Crab3", costumes=["Animals/crab2.gif"], direction=270, size=45, rotation_style="left-right")
+@on_flag(target="Crab", label="spawn_crabs")
+def spawn_crabs():
+    hide()
+    goto_xy(-120, -90)
+    for _ in range(3):
+        speed = random(1, 3)
+        set_size(random(30, 45))
+        create_clone("myself")
+        change_x(120)
 
-@on_flag(target="Crab1", label="wander")
-def crab1_wander():
-    goto_xy(-100, -80)
+@on_clone_start(target="Crab", label="crab_wander")
+def crab_wander():
+    show()
     while True:
-        move(2)
+        move(speed)
         turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
-
-@on_flag(target="Crab2", label="wander")
-def crab2_wander():
-    goto_xy(0, -70)
-    while True:
-        move(2)
-        turn_right(random(-20, 20))
-        bounce()
-        next_costume()
-        wait(0.2)
-
-@on_flag(target="Crab3", label="wander")
-def crab3_wander():
-    goto_xy(100, -90)
-    point_in_direction(270)
-    while True:
-        move(2)
-        turn_right(random(-20, 20))
-        bounce()
-        next_costume()
-        wait(0.2)
-
-notes("Crab3 uses crab2.gif; the costume name is crab2, never crab1.")
 ```
 
-The library files are `crab1-a.png`, `crab1-b.png`, `crab2.gif`. There is no
-`crab1.png`/`crab1.gif`; do not create a costume called `crab1` from
-`crab2.gif`. The green-flag script re-applies the start positions so the scene
-resets on every run.
+One sprite and two scripts instead of three sprites with three copied
+scripts: "make the crabs faster" is now one `replace_script`, and
+`touching("Crab")` sees all three. The library files are `crab1-a.png`,
+`crab1-b.png` and `crab2.gif`. There is no `crab1.png`/`crab1.gif`; a costume
+made from `crab2.gif` is named `crab2`, never `crab1`.
 
 ### B. Stage backdrop cycle with a timed round
 
@@ -780,6 +837,9 @@ Before returning the module, check:
 - [ ] Every def has exactly one event decorator and an existing `target`.
 - [ ] Sprites, variables and lists are created in the module **before** the
       defs that use them.
+- [ ] Three or more similar actors are one template sprite plus clones, not
+      copy-pasted sprites; clone templates `hide()` and their clones `show()`,
+      and nothing reachable from a broadcast or key hat spawns clones.
 - [ ] Every new def is an add, or carries `script_id` to replace; never a
       duplicate hat for the same purpose.
 - [ ] Replacing a script whose current body matters has loaded that sprite this
@@ -801,8 +861,11 @@ Before returning the module, check:
       builtins other than `abs`/`round`/`sqrt`, and no placeholder values
       (`PLACEHOLDER_*`, `TBD`, `...`).
 - [ ] `if`/`wait_until`/`repeat_until` conditions are boolean reporters.
-- [ ] Green-flag scripts initialize position, direction, size, visibility and
-      the variables they own.
+- [ ] The green flag resets everything the project changes: `pen_clear()`
+      before drawing; each changed sprite's position, direction, size,
+      costume, effects, visibility and speech; every variable and list; the
+      backdrop. Resets sit at the top of the looping script, and a revision
+      that moves a start point edits that reset, not only `set_sprite`.
 - [ ] Every `switch_costume`/`switch_backdrop` name exists on that target.
 - [ ] The whole module is roughly 80 blocks or less and the reply is ONE
       fenced python block, ASCII, with no prose and no second object.

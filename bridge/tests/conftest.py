@@ -51,6 +51,7 @@ def _ensure_media_library(tmp_path_factory: pytest.TempPathFactory) -> None:
     ):
         _write(costumes / relative)
     _write(backdrops / "Space/stars.gif")
+    _write(backdrops / "Space/moon.jpg")
     _write(backdrops / "Nature/grass1.png")
     for index in range(20):
         _write(backdrops / "Nature" / f"background-with-a-long-name-{index:02d}.png")

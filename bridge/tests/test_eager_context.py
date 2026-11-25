@@ -13,7 +13,7 @@ from harness.llm import MockLLM, bigger_square_response, draw_square_response
 from harness.providers.base import ModelReply
 from harness.smalltalk import Sym
 
-PACKS = ("clones", "games", "pen-3d", "scrolling")
+PACKS = ("clones", "games", "pen-3d", "scenes", "scrolling")
 TURN_MARKER = "# This turn's project-specific context"
 
 
@@ -228,3 +228,41 @@ def test_habitual_load_of_eager_context_is_a_free_pointer(monkeypatch):
     assert result.attempts == 2
     _, second_user = provider.calls[1]
     assert "Already loaded: Sprite1" in second_user
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "A beach with three crabs",
+        "add 10 fish swimming around",
+        "a night sky full of stars",
+        "lots of red balloons floating up",
+        "a breakout wall of bricks",
+    ],
+)
+def test_a_crowd_of_one_kind_routes_to_clones(request_text):
+    assert "clones" in suggest_packs(request_text, PACKS)
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    ["move 10 steps", "make it 3 times bigger", "add 2 cats", "draw a square"],
+)
+def test_counts_of_units_do_not_route_to_clones(request_text):
+    assert "clones" not in suggest_packs(request_text, PACKS)
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "a dodge game with a title screen",
+        "add a play again button",
+        "make a main menu",
+        "a story with three pages",
+        "show a game over screen when I lose",
+    ],
+)
+def test_multi_screen_wording_routes_to_scenes(request_text):
+    picked = suggest_packs(request_text, PACKS)
+    assert "scenes" in picked
+    assert "clones" not in picked

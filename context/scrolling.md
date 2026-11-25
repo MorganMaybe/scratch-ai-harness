@@ -36,6 +36,7 @@ def move_and_camera():
         cam_x = player_x
         set_x(0)
         set_y(-40)
+        wait(0.03)
 ```
 <!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
@@ -127,6 +128,12 @@ def move_and_camera():
           "args": {
             "y": -40
           }
+        },
+        {
+          "op": "wait",
+          "args": {
+            "seconds": 0.03
+          }
         }
       ]
     }
@@ -140,23 +147,25 @@ world moves under the player.
 ## Scrolling tiles with clones
 
 Tile sprite local variable: `tile_x` (create it first with
-`create_variable(..., scope="sprite")`). Global: `cam_x`, `spawn_index`.
+`create_variable(..., scope="sprite")`). Global: `cam_x`.
 
 ```python
 @on_flag(target="Tile", label="build_tiles")
 def build_tiles():
-    spawn_index = 0
+    hide()
+    set_y(-150)
+    tile_x = 0
     for _ in range(24):
         create_clone("myself")
-        spawn_index += 1
+        tile_x += 40
 
 
 @on_clone_start(target="Tile", label="tile_follow")
 def tile_follow():
-    tile_x = spawn_index * 40
-    set_y(-150)
+    show()
     while True:
         set_x(tile_x - cam_x)
+        wait(0.03)
 ```
 <!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
@@ -170,9 +179,18 @@ def tile_follow():
     },
     "body": [
       {
+        "op": "hide"
+      },
+      {
+        "op": "set_y",
+        "args": {
+          "y": -150
+        }
+      },
+      {
         "op": "set_var",
         "args": {
-          "name": "spawn_index",
+          "name": "tile_x",
           "value": 0
         }
       },
@@ -191,8 +209,8 @@ def tile_follow():
           {
             "op": "change_var",
             "args": {
-              "name": "spawn_index",
-              "delta": 1
+              "name": "tile_x",
+              "delta": 40
             }
           }
         ]
@@ -208,28 +226,7 @@ def tile_follow():
     },
     "body": [
       {
-        "op": "set_var",
-        "args": {
-          "name": "tile_x",
-          "value": {
-            "op": "multiply",
-            "args": {
-              "a": {
-                "op": "get_var",
-                "args": {
-                  "name": "spawn_index"
-                }
-              },
-              "b": 40
-            }
-          }
-        }
-      },
-      {
-        "op": "set_y",
-        "args": {
-          "y": -150
-        }
+        "op": "show"
       },
       {
         "op": "forever",
@@ -255,6 +252,12 @@ def tile_follow():
                 }
               }
             }
+          },
+          {
+            "op": "wait",
+            "args": {
+              "seconds": 0.03
+            }
           }
         ]
       }
@@ -263,9 +266,11 @@ def tile_follow():
 ]
 ```
 
-`spawn_index` is the hand-off channel. Each clone copies it into its own
-`tile_x` on its first frame, so later changes to `spawn_index` do not move
-existing tiles.
+The template sets its own local `tile_x` and then clones: each clone is born
+with the `tile_x` the template held at that instant (local variables are
+copied), so later changes do not move existing tiles and there is no timing
+race. Never hand a value over through a global read in `@on_clone_start` - the
+clone runs a frame later and may see the next value.
 
 There is no stock grass/ground **costume** in the Scratch 1.4 library (searching
 for `grass` finds only grasshoppers). Do not invent `Nature/grass1.png` or any
@@ -282,11 +287,15 @@ the value is 1:
 ```python
 @on_flag(target="Tile", label="build_from_map")
 def build_from_map():
+    hide()
+    set_y(-150)
     spawn_index = 1
+    tile_x = 0
     for _ in range(list_length("map")):
         if list_item(spawn_index, "map") == 1:
             create_clone("myself")
         spawn_index += 1
+        tile_x += 40
 ```
 <!-- generated from the python example above by tools/render_pack_json.py; edit the python, not this -->
 ```json
@@ -299,10 +308,26 @@ def build_from_map():
   },
   "body": [
     {
+      "op": "hide"
+    },
+    {
+      "op": "set_y",
+      "args": {
+        "y": -150
+      }
+    },
+    {
       "op": "set_var",
       "args": {
         "name": "spawn_index",
         "value": 1
+      }
+    },
+    {
+      "op": "set_var",
+      "args": {
+        "name": "tile_x",
+        "value": 0
       }
     },
     {
@@ -352,6 +377,13 @@ def build_from_map():
           "args": {
             "name": "spawn_index",
             "delta": 1
+          }
+        },
+        {
+          "op": "change_var",
+          "args": {
+            "name": "tile_x",
+            "delta": 40
           }
         }
       ]

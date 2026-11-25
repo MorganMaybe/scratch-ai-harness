@@ -1,7 +1,7 @@
 """Shared helpers for the dialect context-pack examples and their JSON twins.
 
-Every change-set example in ``context/games.md``, ``context/clones.md`` and
-``context/scrolling.md`` is written in the Scratch-Python dialect; the JSON
+Every change-set example in ``context/games.md``, ``context/clones.md``,
+``context/scrolling.md`` and ``context/scenes.md`` is written in the Scratch-Python dialect; the JSON
 block below each example is generated from it by
 ``tools/render_pack_json.py``.  This module owns the parts both the generator
 and the validator need:
@@ -115,7 +115,20 @@ PACKS: dict[str, PackSpec] = {
     "clones": PackSpec(
         name="clones",
         setup=(
-            {"action": "create_variable", "name": "spawn_index", "scope": "global", "initial": 0},
+            {"action": "create_variable", "name": "score", "scope": "global", "initial": 0},
+            {
+                "action": "create_sprite",
+                "name": "Player",
+                "costumes": [{"library": "Animals/bat1-a.png"}],
+            },
+            {
+                "action": "create_sprite",
+                "name": "Crab",
+                "costumes": [
+                    {"library": "Animals/bat1-a.png"},
+                    {"library": "Animals/bat1-b.png"},
+                ],
+            },
             {
                 "action": "create_sprite",
                 "name": "Bullet",
@@ -132,18 +145,53 @@ PACKS: dict[str, PackSpec] = {
                 "costumes": [{"library": "Geometry/line.png"}],
             },
             {
-                "action": "create_variable",
-                "name": "life",
-                "scope": "sprite",
-                "target": "Spark",
-                "initial": 30,
+                "action": "create_sprite",
+                "name": "Coin",
+                "costumes": [{"library": "Scenery/rock.png"}],
             },
             {
                 "action": "create_variable",
-                "name": "tile_index",
+                "name": "speed",
                 "scope": "sprite",
-                "target": "Tile",
+                "target": "Crab",
                 "initial": 0,
+            },
+            {
+                "action": "create_variable",
+                "name": "is_clone",
+                "scope": "sprite",
+                "target": "Spark",
+                "initial": 0,
+            },
+        ),
+    ),
+    "scenes": PackSpec(
+        name="scenes",
+        setup=(
+            {"action": "create_variable", "name": "scene", "scope": "global", "initial": 1},
+            {"action": "create_variable", "name": "score", "scope": "global", "initial": 0},
+            {"action": "create_variable", "name": "lives", "scope": "global", "initial": 3},
+            {"action": "set_backdrop", "library": "Space/stars.gif", "select": True},
+            {"action": "set_backdrop", "library": "Space/moon.jpg", "select": False},
+            {
+                "action": "create_sprite",
+                "name": "PlayButton",
+                "costumes": [{"library": "Geometry/line.png"}],
+            },
+            {
+                "action": "create_sprite",
+                "name": "Message",
+                "costumes": [{"library": "Animals/dove1-a.png"}],
+            },
+            {
+                "action": "create_sprite",
+                "name": "Player",
+                "costumes": [{"library": "Animals/bat1-a.png"}],
+            },
+            {
+                "action": "create_sprite",
+                "name": "Rock",
+                "costumes": [{"library": "Scenery/rock.png"}],
             },
         ),
     ),
