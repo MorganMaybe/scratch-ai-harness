@@ -21,7 +21,8 @@ model only the dialect it is expected to write.
 
 | Pack | Use when |
 |---|---|
-| `clones.md` | spawning bullets, particles, enemies, tiles, trails; clone lifecycle and touching |
+| `clones.md` | any scene with three or more similar things (the default over copy-pasted sprites); spawners, particles, grids, collectibles; exact clone semantics |
+| `games.md` | score/HUD, game over and reset, platformer and flappy physics, prop art |
 | `scrolling.md` | side-scrolling levels, camera-follow, parallax, tiled maps |
 | `pen-3d.md` | 3D projection and meshes in Scratch, multiple drawer sprites, depth effects, pen/frame limits |
 

@@ -42,8 +42,8 @@ packs at a time and only when the request actually needs one.
 
 Available packs:
 
-- `clones` — clone lifecycle, 300 limit, clone-aware touching, bullets,
-  particles, tiled scenery.
+- `clones` — any scene with three or more similar things: exact clone
+  semantics, the stamp idiom, spawners, particles, grids, collectibles.
 - `games` — game feel: score/HUD, game over and green-flag reset,
   platformer landing physics, flappy-style clone obstacles, prop art,
   animation and sounds.
@@ -52,8 +52,8 @@ Available packs:
   multiple sprites drawing together, and pen/frame limits.
 
 For example, a scrolling platformer request should load `scrolling`; a rotating
-cube or any other 3D scene should load `pen-3d`; a particle or bullet request
-should load `clones`.
+cube or any other 3D scene should load `pen-3d`; a particle or bullet request,
+or any scene with a crowd of the same thing, should load `clones`.
 
 ## Sprite script detail (load on demand)
 
@@ -376,11 +376,27 @@ These are the behavior notes the catalog does not express:
   `touching`, `key_pressed`, `mouse_down`, etc.).
 - `glide` takes seconds, x, y; `wait` takes seconds.
 
-### Clones
+### Clones - the default for "many of the same thing"
 
-See the optional `clones` context pack for clone lifecycle, limits, clone-aware
-`touching`, and bullets/particles/tile patterns. The catalog already lists the
-`create_clone`, `delete_clone` and `when_clone_start` ops.
+Three or more similar actors (crabs, stars, coins, enemies, bricks, trees,
+snowflakes) are **one template sprite plus clones**, not copy-pasted sprites
+with copy-pasted scripts: fewer blocks, one script to revise, and `touching`
+that sprite sees every clone. Keep separate sprites only for distinct
+characters with their own roles, or when the user asked for named sprites.
+
+The essentials (the `clones` pack has the full semantics and patterns):
+
+- `create_clone` of `myself` copies the sprite **at that instant** - position,
+  direction, size, costume, effects, visibility and its local variables. So
+  stamp: move the template, set its locals, then clone; `hide` the template
+  when it is only a stamp, and `show` first in `when_clone_start`.
+- Only `when_clone_start` scripts start in a new clone, but `when_receive`,
+  `when_key_pressed` and `when_clicked` scripts run in every clone too: never
+  spawn clones from those (one broadcast would double the population).
+- Per-clone state (`speed`, `hp`, `scored`) is a sprite-local variable;
+  globals are shared. A clone tests its own collisions (`touching` Player) and
+  ends with `delete_clone`.
+- The green flag deletes every clone; at most 300 live, keep it to tens.
 
 ### Motion (sprites only)
 
@@ -529,9 +545,10 @@ Use this sequence:
 9. **Self-check** the section 13 list.
 10. **Return JSON only.**
 
-A useful default for scenes: a backdrop `set_backdrop`, 2–4 sprites with one
-`wander`/`patrol` script each, a global `score`, and a stage script only when
-the backdrop must change on a timer.
+A useful default for scenes: a backdrop `set_backdrop`, one sprite per
+distinct role (player, enemy type, collectible type), clones for every crowd
+of the same thing, a global `score`, and a stage script only when the
+backdrop must change on a timer.
 
 A request that describes a **game** (score, lives, jumping, dodging, enemies,
 win/lose) should load the `games` pack first, plus `clones` when it spawns
@@ -797,6 +814,9 @@ the index is authoritative.
 
 Before returning JSON, check:
 
+- [ ] Three or more similar actors are one template sprite plus clones, not
+      copy-pasted sprites; templates `hide` and clones `show`, and nothing
+      reachable from a broadcast or key hat spawns clones.
 - [ ] Every `target` exists, or was created earlier in the same change set.
 - [ ] A sprite named inside any menu argument (`touching`, `distance_to`,
       `goto_sprite`, `point_towards`) also exists at that point in the set.

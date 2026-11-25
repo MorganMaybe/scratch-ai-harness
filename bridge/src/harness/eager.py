@@ -71,7 +71,30 @@ _PACK_PATTERNS: dict[str, tuple[str, ...]] = {
         r"pipes?",
         r"asteroids?",
         r"enemies",
-        r"many (copies|enemies|coins|stars)",
+        r"crowds?",
+        r"flocks?",
+        r"herds?",
+        r"schools? of",
+        r"army",
+        r"armies",
+        r"waves? of",
+        r"rows? of",
+        r"grids? of",
+        r"bricks",
+        r"coins",
+        r"snowflakes?",
+        r"raindrops?",
+        r"stars",
+        r"meteors?",
+        # "three crabs", "10 fish", "lots of trees": a crowd of one kind is
+        # one template sprite plus clones.
+        r"(?:three|four|five|six|seven|eight|nine|ten|twelve|twenty|"
+        r"dozens?|hundreds?|[3-9]|[1-9]\d+)\s+(?:of\s+)?"
+        r"(?!(?:steps?|seconds?|secs?|pixels?|px|degrees?|times?|percent|"
+        r"points?|lives|levels?|frames?|blocks?|beats?|%)\b)"
+        r"(?:[a-z]+\s+)?[a-z]+",
+        r"(?:many|several|lots of|a lot of|a bunch of|loads of|a few|some)"
+        r"\s+(?:\w+\s+)?\w+s",
     ),
     "scrolling": (
         r"scroll\w*",

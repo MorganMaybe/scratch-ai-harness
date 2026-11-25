@@ -225,6 +225,17 @@ yet - the measurement plan is at the end.
   `wait(0.03)` for controls/physics, a `#` comment plan at the top of
   multi-script modules, and "check the end of the prompt before loading".
 
+- **Clones as the crowd default:** `context/clones.md` rewritten from the
+  image implementation (`image/33_clones.st`): a clone is a `fullCopy` at
+  `create_clone` time (so locals, costume, position and *visibility* are
+  inherited), only clone hats start but receive/key/click hats run in every
+  clone (clone bombs), the stamp idiom (set up, then clone) replacing the
+  racy global hand-off, and spawner/particle/grid/collectible patterns. Both
+  core guides, the DSL system prompt and the worked crab example now make
+  "three or more similar actors = one template sprite + clones" the default;
+  eager routing loads the pack for crowd wording ("three crabs", "10 fish",
+  "lots of stars"). `context/scrolling.md` tiles moved to the stamp idiom.
+
 **Measure next (live, `-Audit full`):** the platformer_chain and doodle-jump
 replay with `-EagerContext on` vs `off`: attempts per revision (expect ~1),
 wall time, `cached_tokens` on attempt 2+ and on consecutive turns, dropped

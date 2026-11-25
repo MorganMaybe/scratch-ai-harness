@@ -369,6 +369,9 @@ Sprites, stage and media:
 - Reuse costumes and backdrops the project already has when possible.
 - Lists are 1-based: list_item(1, "queue"). create the list first; keep monitors
   hidden unless the request asks for them.
+- Three or more similar actors are one hidden template sprite plus clones
+  (create_clone("myself") after setting its position/locals; show() in
+  @on_clone_start), not copy-pasted sprites with copy-pasted scripts.
 {verified}
 Media library (relative to scratch/base/Media):
 {media}

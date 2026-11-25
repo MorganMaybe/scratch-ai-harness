@@ -32,8 +32,9 @@ returning JSON **only** (not a python fence):
 ```
 
 The bridge resends with the pack or bodies included. Do not combine these with
-a module; load at most two packs at a time. Packs: `clones` (lifecycle, 300
-limit, bullets/particles/tiles), `games` (score/HUD, game over, platformer and
+a module; load at most two packs at a time. Packs: `clones` (any scene with
+three or more similar things; exact clone semantics, spawners, particles,
+grids, collectibles), `games` (score/HUD, game over, platformer and
 flappy physics), `scrolling` (camera, parallax, tile maps), `pen-3d` (3D
 projection, meshes, pen/frame limits).
 
@@ -437,11 +438,27 @@ These are the behavior notes it does not express.
   `touching`, `key_pressed`, `mouse_down`, ...). `glide(seconds, x, y)`;
   `wait(seconds)`.
 
-### Clones
+### Clones - the default for "many of the same thing"
 
-See the `clones` pack for lifecycle, limits, clone-aware `touching`, and
-bullet/particle/tile patterns. The catalog already lists
-`create_clone(target)`, `delete_clone()` and `@on_clone_start`.
+Three or more similar actors (crabs, stars, coins, enemies, bricks, trees,
+snowflakes) are **one template sprite plus clones**, not copy-pasted sprites
+with copy-pasted scripts: fewer blocks, one script to revise, and
+`touching("Coin")` sees every clone. Keep separate sprites only for distinct
+characters with their own roles, or when the user asked for named sprites.
+
+The essentials (the `clones` pack has the full semantics and patterns):
+
+- `create_clone("myself")` copies the sprite **at that instant** - position,
+  direction, size, costume, effects, visibility and its local variables. So
+  stamp: move the template, set its locals, then clone; `hide()` the template
+  when it is only a stamp, and `show()` first in `@on_clone_start`.
+- Only `@on_clone_start` scripts start in a new clone, but `@on_receive`,
+  `@on_key` and `@on_click` scripts run in every clone too: never spawn clones
+  from those (one broadcast would double the population).
+- Per-clone state (`speed`, `hp`, `scored`) is a sprite-local variable;
+  globals are shared. A clone tests its own collisions
+  (`if touching("Player"):`) and ends with `delete_clone()`.
+- The green flag deletes every clone; at most 300 live, keep it to tens.
 
 ### Motion (sprites only)
 
@@ -575,9 +592,10 @@ value.
    line/arc approximations, not one block per pixel.
 7. **Self-check** section 12. **Return one fenced python block only.**
 
-A useful default: a backdrop `set_backdrop`, 2-4 sprites with one
-`wander`/`patrol` script each, a global `score`, and a stage script only when
-the backdrop must change on a timer.
+A useful default: a backdrop `set_backdrop`, one sprite per distinct role
+(player, enemy type, collectible type), clones for every crowd of the same
+thing, a global `score`, and a stage script only when the backdrop must change
+on a timer.
 
 A **game** request (score, lives, jumping, dodging, enemies, win/lose) should
 load the `games` pack first, plus `clones` when it spawns pipes, bullets or
@@ -683,54 +701,42 @@ def crab1_go():
 
 ## 11. Worked examples
 
-### A. A beach with three correctly labelled crabs
+### A. A beach with three wandering crabs (one sprite, clones)
 
 ```python
+# plan: one Crab template (hidden stamp) -> 3 clones at different spots/sizes
+# local speed is set before each create_clone, so every clone keeps its own
 summary("Added a beach backdrop and three wandering crabs.")
 set_backdrop("Nature/beach-malibu.jpg", select=True)
+create_sprite("Crab", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=40, rotation_style="left-right")
+create_variable("speed", scope="sprite", target="Crab", initial=2)
 
-create_sprite("Crab1", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=40, rotation_style="left-right")
-create_sprite("Crab2", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=35, rotation_style="left-right")
-create_sprite("Crab3", costumes=["Animals/crab2.gif"], direction=270, size=45, rotation_style="left-right")
+@on_flag(target="Crab", label="spawn_crabs")
+def spawn_crabs():
+    hide()
+    goto_xy(-120, -90)
+    for _ in range(3):
+        speed = random(1, 3)
+        set_size(random(30, 45))
+        create_clone("myself")
+        change_x(120)
 
-@on_flag(target="Crab1", label="wander")
-def crab1_wander():
-    goto_xy(-100, -80)
+@on_clone_start(target="Crab", label="crab_wander")
+def crab_wander():
+    show()
     while True:
-        move(2)
+        move(speed)
         turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
-
-@on_flag(target="Crab2", label="wander")
-def crab2_wander():
-    goto_xy(0, -70)
-    while True:
-        move(2)
-        turn_right(random(-20, 20))
-        bounce()
-        next_costume()
-        wait(0.2)
-
-@on_flag(target="Crab3", label="wander")
-def crab3_wander():
-    goto_xy(100, -90)
-    point_in_direction(270)
-    while True:
-        move(2)
-        turn_right(random(-20, 20))
-        bounce()
-        next_costume()
-        wait(0.2)
-
-notes("Crab3 uses crab2.gif; the costume name is crab2, never crab1.")
 ```
 
-The library files are `crab1-a.png`, `crab1-b.png`, `crab2.gif`. There is no
-`crab1.png`/`crab1.gif`; do not create a costume called `crab1` from
-`crab2.gif`. The green-flag script re-applies the start positions so the scene
-resets on every run.
+One sprite and two scripts instead of three sprites with three copied
+scripts: "make the crabs faster" is now one `replace_script`, and
+`touching("Crab")` sees all three. The library files are `crab1-a.png`,
+`crab1-b.png` and `crab2.gif`. There is no `crab1.png`/`crab1.gif`; a costume
+made from `crab2.gif` is named `crab2`, never `crab1`.
 
 ### B. Stage backdrop cycle with a timed round
 
@@ -780,6 +786,9 @@ Before returning the module, check:
 - [ ] Every def has exactly one event decorator and an existing `target`.
 - [ ] Sprites, variables and lists are created in the module **before** the
       defs that use them.
+- [ ] Three or more similar actors are one template sprite plus clones, not
+      copy-pasted sprites; clone templates `hide()` and their clones `show()`,
+      and nothing reachable from a broadcast or key hat spawns clones.
 - [ ] Every new def is an add, or carries `script_id` to replace; never a
       duplicate hat for the same purpose.
 - [ ] Replacing a script whose current body matters has loaded that sprite this

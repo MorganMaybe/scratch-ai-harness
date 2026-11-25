@@ -228,3 +228,25 @@ def test_habitual_load_of_eager_context_is_a_free_pointer(monkeypatch):
     assert result.attempts == 2
     _, second_user = provider.calls[1]
     assert "Already loaded: Sprite1" in second_user
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "A beach with three crabs",
+        "add 10 fish swimming around",
+        "a night sky full of stars",
+        "lots of red balloons floating up",
+        "a breakout wall of bricks",
+    ],
+)
+def test_a_crowd_of_one_kind_routes_to_clones(request_text):
+    assert "clones" in suggest_packs(request_text, PACKS)
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    ["move 10 steps", "make it 3 times bigger", "add 2 cats", "draw a square"],
+)
+def test_counts_of_units_do_not_route_to_clones(request_text):
+    assert "clones" not in suggest_packs(request_text, PACKS)

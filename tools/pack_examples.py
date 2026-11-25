@@ -115,7 +115,20 @@ PACKS: dict[str, PackSpec] = {
     "clones": PackSpec(
         name="clones",
         setup=(
-            {"action": "create_variable", "name": "spawn_index", "scope": "global", "initial": 0},
+            {"action": "create_variable", "name": "score", "scope": "global", "initial": 0},
+            {
+                "action": "create_sprite",
+                "name": "Player",
+                "costumes": [{"library": "Animals/bat1-a.png"}],
+            },
+            {
+                "action": "create_sprite",
+                "name": "Crab",
+                "costumes": [
+                    {"library": "Animals/bat1-a.png"},
+                    {"library": "Animals/bat1-b.png"},
+                ],
+            },
             {
                 "action": "create_sprite",
                 "name": "Bullet",
@@ -132,17 +145,22 @@ PACKS: dict[str, PackSpec] = {
                 "costumes": [{"library": "Geometry/line.png"}],
             },
             {
-                "action": "create_variable",
-                "name": "life",
-                "scope": "sprite",
-                "target": "Spark",
-                "initial": 30,
+                "action": "create_sprite",
+                "name": "Coin",
+                "costumes": [{"library": "Scenery/rock.png"}],
             },
             {
                 "action": "create_variable",
-                "name": "tile_index",
+                "name": "speed",
                 "scope": "sprite",
-                "target": "Tile",
+                "target": "Crab",
+                "initial": 0,
+            },
+            {
+                "action": "create_variable",
+                "name": "is_clone",
+                "scope": "sprite",
+                "target": "Spark",
                 "initial": 0,
             },
         ),
