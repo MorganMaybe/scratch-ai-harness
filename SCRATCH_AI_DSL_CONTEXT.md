@@ -36,7 +36,8 @@ a module; load at most two packs at a time. Packs: `clones` (any scene with
 three or more similar things; exact clone semantics, spawners, particles,
 grids, collectibles), `games` (score/HUD, game over, platformer and
 flappy physics), `scrolling` (camera, parallax, tile maps), `pen-3d` (3D
-projection, meshes, pen/frame limits).
+projection, meshes, pen/frame limits), `scenes` (title/menu/play/game-over
+screens driven by a global `scene` number and a `scene_changed` broadcast).
 
 **Loaded packs show block examples in this dialect**, with the same function
 names and argument order as this reference. The JSON blocks you may see in the
@@ -584,9 +585,9 @@ value.
 4. **Coordinate.** Use globals + `broadcast`/`@on_receive` for cross-sprite
    events. Direct `touching`/`distance_to`/`goto_sprite`/`point_towards` may
    name an existing sprite. Give each sprite one clear behavior.
-5. **Initialize.** Every green-flag script should set position, direction,
-   size, visibility, costume and its variables. Negative coordinates go in the
-   script, not the module call.
+5. **Reset.** The green flag must rebuild the start state every time: see
+   "Reset on green flag" in section 10 - pen cleared, every changed sprite put
+   back, every variable and list re-initialized.
 6. **Keep scripts small.** One behavior per script; `while True:` + `wait` for
    continuous motion; `for _ in range(n):` for finite loops. Pen art is a few
    line/arc approximations, not one block per pixel.
@@ -605,16 +606,66 @@ enemies; do not improvise landing physics without the pack.
 
 ## 10. Reusable patterns
 
-### Green-flag initialization
+### Reset on green flag (every project, every revision)
+
+The green flag is the user's restart button: the second run must look and
+behave exactly like the first. In Scratch 1.4 **nothing resets by itself**
+except clones (the flag deletes them). Pen trails, position, direction, size,
+costume, visibility, graphic effects, speech bubbles, layer order, variables,
+list contents, the backdrop and the timer all keep whatever the last run - or
+the user's dragging - left behind. So the green flag must reset **every piece
+of state the project changes**:
+
+| The project changes... | The green flag resets it with |
+|---|---|
+| pen trails | `pen_clear()` (once, Stage or the drawing sprite), then `pen_up()` and the pen colour/size before any `pen_down()` |
+| where a sprite is / faces | `goto_xy(x, y)`, `point_in_direction(d)` |
+| size, costume, look | `set_size(p)`, `switch_costume("name")`, `clear_effects()` |
+| visibility | `show()` or `hide()` - explicitly, both ways |
+| speech | `say("")` |
+| draw order | `go_to_front()` / `go_back_layers(n)` when layering matters |
+| variables | `score = 0`, `lives = 3`, `game_over = 0` - every variable any script changes |
+| lists | `delete_from_list("all", "queue")`, then refill |
+| backdrop / timer | `switch_backdrop("start")`, `reset_timer()` (Stage) |
 
 ```python
-@on_flag(target="Crab1", label="reset")
-def crab1_reset():
+@on_flag(target="Stage", label="reset_world")
+def reset_world():
+    pen_clear()
+    switch_backdrop("stars")
+    score = 0
+    game_over = 0
+    reset_timer()
+
+@on_flag(target="Crab", label="crab_run")
+def crab_run():
     goto_xy(-80, -60)
     point_in_direction(90)
     set_size(40)
+    switch_costume("crab1-a")
+    clear_effects()
+    say("")
     show()
+    while True:
+        move(2)
+        bounce()
+        wait(0.1)
 ```
+
+- **Reset at the top of the script that runs the loop**, before
+  `while True:`. Two `@on_flag` scripts of one sprite start together, so a
+  separate reset script races the loop. Reset each global in exactly one place
+  (the Stage's flag script).
+- **The start position lives in the script.** `create_sprite(x=...)` and
+  `set_sprite(...)` place a sprite once, when the change applies; after a run
+  or a drag only the flag script puts it back. On a revision that moves a
+  starting point ("start lower", "put the cat on the left"), change the
+  `goto_xy` in its reset - a `set_sprite` alone is undone by the next green
+  flag.
+- **A revision that adds state adds its reset**: a new variable, effect, pen
+  drawing, costume change or hidden sprite gets its line in the flag script.
+- Pen drawings start with `pen_clear()` unless the request is to keep drawing
+  over earlier runs.
 
 ### Wander with edge bounce and costume animation
 
@@ -810,8 +861,11 @@ Before returning the module, check:
       builtins other than `abs`/`round`/`sqrt`, and no placeholder values
       (`PLACEHOLDER_*`, `TBD`, `...`).
 - [ ] `if`/`wait_until`/`repeat_until` conditions are boolean reporters.
-- [ ] Green-flag scripts initialize position, direction, size, visibility and
-      the variables they own.
+- [ ] The green flag resets everything the project changes: `pen_clear()`
+      before drawing; each changed sprite's position, direction, size,
+      costume, effects, visibility and speech; every variable and list; the
+      backdrop. Resets sit at the top of the looping script, and a revision
+      that moves a start point edits that reset, not only `set_sprite`.
 - [ ] Every `switch_costume`/`switch_backdrop` name exists on that target.
 - [ ] The whole module is roughly 80 blocks or less and the reply is ONE
       fenced python block, ASCII, with no prose and no second object.

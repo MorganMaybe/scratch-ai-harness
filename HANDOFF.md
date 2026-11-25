@@ -236,6 +236,18 @@ yet - the measurement plan is at the end.
   eager routing loads the pack for crowd wording ("three crabs", "10 fish",
   "lots of stars"). `context/scrolling.md` tiles moved to the stamp idiom.
 
+- **Green-flag reset + scenes pack:** both core guides gained "Reset on green
+  flag" (nothing resets by itself in 1.4 except clones: pen, position,
+  direction, size, costume, effects, visibility, speech, layers, variables,
+  lists, backdrop, timer; resets at the top of the looping script; a revision
+  that moves a start point edits the `goto_xy` in the reset, not only
+  `set_sprite`). New `context/scenes.md`: one global `scene` number, set then
+  `broadcast("scene_changed")`, a handler per sprite that shows/hides and
+  resets on scene entry, a Stage router for backdrops, scene loops
+  `while scene == N:`; routed eagerly on title/menu/game-over/play-again
+  wording. The JSON system prompt is now 86.3k of the 90k budget with the
+  full media index - watch it before growing the JSON guide further.
+
 **Measure next (live, `-Audit full`):** the platformer_chain and doodle-jump
 replay with `-EagerContext on` vs `off`: attempts per revision (expect ~1),
 wall time, `cached_tokens` on attempt 2+ and on consecutive turns, dropped

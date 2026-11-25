@@ -91,7 +91,8 @@ _PACK_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(?:three|four|five|six|seven|eight|nine|ten|twelve|twenty|"
         r"dozens?|hundreds?|[3-9]|[1-9]\d+)\s+(?:of\s+)?"
         r"(?!(?:steps?|seconds?|secs?|pixels?|px|degrees?|times?|percent|"
-        r"points?|lives|levels?|frames?|blocks?|beats?|%)\b)"
+        r"points?|lives|levels?|frames?|blocks?|beats?|pages?|rooms?|"
+        r"screens?|scenes?|chapters?|%)\b)"
         r"(?:[a-z]+\s+)?[a-z]+",
         r"(?:many|several|lots of|a lot of|a bunch of|loads of|a few|some)"
         r"\s+(?:\w+\s+)?\w+s",
@@ -105,6 +106,26 @@ _PACK_PATTERNS: dict[str, tuple[str, ...]] = {
         r"long level",
         r"endless runner",
         r"runner game",
+    ),
+    "scenes": (
+        r"scenes?",
+        r"screens?",
+        r"title screen",
+        r"menus?",
+        r"main menu",
+        r"start (screen|button|menu)",
+        r"play button",
+        r"play again",
+        r"restart button",
+        r"game over screen",
+        r"(win|winning|victory|ending|end) screen",
+        r"instructions? (screen|page)",
+        r"cutscenes?",
+        r"rooms",
+        r"chapters?",
+        r"story (pages?|book)",
+        r"slides?(how)?",
+        r"pages",
     ),
     "games": (
         r"games?",
@@ -137,9 +158,9 @@ _COMPILED: dict[str, re.Pattern[str]] = {
 }
 
 #: When more than ``EAGER_MAX_PACKS`` match, the more specialised pack wins:
-#: 3D and scrolling change the whole architecture, clones the spawn pattern,
-#: and games is the broadest checklist.
-_PACK_PRIORITY = ("pen-3d", "scrolling", "clones", "games")
+#: 3D, scrolling and scenes change the whole architecture, clones the spawn
+#: pattern, and games is the broadest checklist.
+_PACK_PRIORITY = ("pen-3d", "scrolling", "scenes", "clones", "games")
 
 
 def _pack_hits(text: str) -> dict[str, int]:
