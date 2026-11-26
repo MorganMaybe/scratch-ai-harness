@@ -25,8 +25,11 @@ inside this harness.
 ## Context packs (load on demand)
 
 The core guide is always included. Specialized detail lives in optional
-**context packs** under `context/`. Before writing blocks, check this list; if a
-pack matches the request, load it first. When you need one, return **only**:
+**context packs** under `context/`. **Check the end of the system prompt
+first:** under "This turn's project-specific context" the bridge often already
+includes the packs the request needs and the exact AI-owned script bodies; use
+those directly. Only if a pack you need is missing, load it first by returning
+**only**:
 
 ```json
 { "load_context": ["clones"], "reason": "the user wants particle clones" }
@@ -39,18 +42,22 @@ packs at a time and only when the request actually needs one.
 
 Available packs:
 
-- `clones` — clone lifecycle, 300 limit, clone-aware touching, bullets,
-  particles, tiled scenery.
+- `clones` — any scene with three or more similar things: exact clone
+  semantics, the stamp idiom, spawners, particles, grids, collectibles.
 - `games` — game feel: score/HUD, game over and green-flag reset,
   platformer landing physics, flappy-style clone obstacles, prop art,
   animation and sounds.
 - `scrolling` — camera/world coordinates, scrolling levels, parallax, tile maps.
 - `pen-3d` — 3D in Scratch: projection to the Stage, meshes of any shape,
   multiple sprites drawing together, and pen/frame limits.
+- `scenes` — multiple screens (title, menu, play, game over, rooms, story
+  pages): a global `scene` number, one `scene_changed` broadcast, per-sprite
+  show/hide and per-scene resets.
 
 For example, a scrolling platformer request should load `scrolling`; a rotating
-cube or any other 3D scene should load `pen-3d`; a particle or bullet request
-should load `clones`.
+cube or any other 3D scene should load `pen-3d`; a particle or bullet request,
+or any scene with a crowd of the same thing, should load `clones`; a title
+screen, menu, game over screen or "play again" should load `scenes`.
 
 ## Sprite script detail (load on demand)
 
@@ -210,8 +217,10 @@ fields are rejected.
 | `set_backdrop` | `library`, optional `name`, `select` | Stage only. `select` defaults true. |
 | `set_sprite` | `target`, optional `x y direction size visible rotation_style` | Sprite only (not Stage). Omitted fields stay unchanged. |
 
-Before replacing an AI-owned script whose current body matters, request
-`load_sprite` for its sprite when the detail index lists it; the detail block
+Before replacing an AI-owned script whose current body matters, use its exact
+body when it is already included ("Exact current script bodies are included
+below"); otherwise request `load_sprite` for its sprite when the detail index
+lists it; the detail block
 gives the exact `script_id` and blocks to preserve. If no index is shown, use
 the script ids and metadata from the project context.
 
@@ -371,11 +380,27 @@ These are the behavior notes the catalog does not express:
   `touching`, `key_pressed`, `mouse_down`, etc.).
 - `glide` takes seconds, x, y; `wait` takes seconds.
 
-### Clones
+### Clones - the default for "many of the same thing"
 
-See the optional `clones` context pack for clone lifecycle, limits, clone-aware
-`touching`, and bullets/particles/tile patterns. The catalog already lists the
-`create_clone`, `delete_clone` and `when_clone_start` ops.
+Three or more similar actors (crabs, stars, coins, enemies, bricks, trees,
+snowflakes) are **one template sprite plus clones**, not copy-pasted sprites
+with copy-pasted scripts: fewer blocks, one script to revise, and `touching`
+that sprite sees every clone. Keep separate sprites only for distinct
+characters with their own roles, or when the user asked for named sprites.
+
+The essentials (the `clones` pack has the full semantics and patterns):
+
+- `create_clone` of `myself` copies the sprite **at that instant** - position,
+  direction, size, costume, effects, visibility and its local variables. So
+  stamp: move the template, set its locals, then clone; `hide` the template
+  when it is only a stamp, and `show` first in `when_clone_start`.
+- Only `when_clone_start` scripts start in a new clone, but `when_receive`,
+  `when_key_pressed` and `when_clicked` scripts run in every clone too: never
+  spawn clones from those (one broadcast would double the population).
+- Per-clone state (`speed`, `hp`, `scored`) is a sprite-local variable;
+  globals are shared. A clone tests its own collisions (`touching` Player) and
+  ends with `delete_clone`.
+- The green flag deletes every clone; at most 300 live, keep it to tens.
 
 ### Motion (sprites only)
 
@@ -516,17 +541,19 @@ Use this sequence:
    cross-sprite events. Direct `touching`/`distance_to`/`goto_sprite`/
    `point_towards` may name an existing sprite. Give each sprite one clear
    behavior.
-7. **Initialize.** Every green-flag script should set position, direction,
-   size, visibility, costume, and any variables it owns.
+7. **Reset.** The green flag must rebuild the start state every time: see
+   "Reset on green flag" in the reusable patterns - pen cleared, every changed
+   sprite put back, every variable and list re-initialized.
 8. **Keep scripts small.** One behavior per script; use `forever` + `wait` for
    continuous motion; use `repeat` for finite loops. For pen drawings, use a
    handful of line/arc approximations, never one block per pixel.
 9. **Self-check** the section 13 list.
 10. **Return JSON only.**
 
-A useful default for scenes: a backdrop `set_backdrop`, 2–4 sprites with one
-`wander`/`patrol` script each, a global `score`, and a stage script only when
-the backdrop must change on a timer.
+A useful default for scenes: a backdrop `set_backdrop`, one sprite per
+distinct role (player, enemy type, collectible type), clones for every crowd
+of the same thing, a global `score`, and a stage script only when the
+backdrop must change on a timer.
 
 A request that describes a **game** (score, lives, jumping, dodging, enemies,
 win/lose) should load the `games` pack first, plus `clones` when it spawns
@@ -537,22 +564,63 @@ platformer/flappy patterns; do not improvise landing physics without it.
 
 ## 11. Reusable patterns
 
-### Green-flag initialization
+### Reset on green flag (every project, every revision)
+
+The green flag is the user's restart button: the second run must look and
+behave exactly like the first. In Scratch 1.4 **nothing resets by itself**
+except clones (the flag deletes them). Pen trails, position, direction, size,
+costume, visibility, graphic effects, speech bubbles, layer order, variables,
+list contents, the backdrop and the timer all keep whatever the last run - or
+the user's dragging - left behind. So the green flag must reset **every piece
+of state the project changes**:
+
+| The project changes... | The green flag resets it with |
+|---|---|
+| pen trails | `pen_clear` (once, Stage or the drawing sprite), then `pen_up` and the pen colour/size before any `pen_down` |
+| where a sprite is / faces | `goto_xy`, `point_in_direction` |
+| size, costume, look | `set_size`, `switch_costume`, `clear_effects` |
+| visibility | `show` or `hide` - explicitly, both ways |
+| speech | `say` with `""` |
+| draw order | `go_to_front` / `go_back_layers` when layering matters |
+| variables | `set_var` for every variable any script changes (`score` 0, `lives` 3) |
+| lists | `delete_from_list` index `all`, then refill |
+| backdrop / timer | `switch_backdrop`, `reset_timer` (Stage) |
 
 ```json
 {
   "action": "add_script",
-  "target": "Crab1",
-  "label": "reset",
+  "target": "Crab",
+  "label": "crab_run",
   "hat": { "op": "when_flag_clicked" },
   "body": [
     { "op": "goto_xy", "args": { "x": -80, "y": -60 } },
     { "op": "point_in_direction", "args": { "degrees": 90 } },
     { "op": "set_size", "args": { "percent": 40 } },
-    { "op": "show" }
+    { "op": "switch_costume", "args": { "costume": "crab1-a" } },
+    { "op": "clear_effects" },
+    { "op": "say", "args": { "text": "" } },
+    { "op": "show" },
+    { "op": "forever", "body": [
+      { "op": "move", "args": { "steps": 2 } },
+      { "op": "bounce" },
+      { "op": "wait", "args": { "seconds": 0.1 } }
+    ]}
   ]
 }
 ```
+
+- **Reset at the top of the script that runs the loop**, before `forever`.
+  Two `when_flag_clicked` scripts of one sprite start together, so a separate
+  reset script races the loop. Reset each global in exactly one place (a
+  Stage `when_flag_clicked` script that also does `pen_clear` and the
+  backdrop).
+- **The start position lives in the script.** `create_sprite` x/y and
+  `set_sprite` place a sprite once, when the change applies; after a run or a
+  drag only the flag script puts it back. On a revision that moves a starting
+  point ("start lower"), change the `goto_xy` in its reset - a `set_sprite`
+  alone is undone by the next green flag.
+- **A revision that adds state adds its reset**: a new variable, effect, pen
+  drawing, costume change or hidden sprite gets its line in the flag script.
 
 ### Wander with edge bounce and costume animation
 
@@ -792,6 +860,9 @@ the index is authoritative.
 
 Before returning JSON, check:
 
+- [ ] Three or more similar actors are one template sprite plus clones, not
+      copy-pasted sprites; templates `hide` and clones `show`, and nothing
+      reachable from a broadcast or key hat spawns clones.
 - [ ] Every `target` exists, or was created earlier in the same change set.
 - [ ] A sprite named inside any menu argument (`touching`, `distance_to`,
       `goto_sprite`, `point_towards`) also exists at that point in the set.
@@ -813,7 +884,11 @@ Before returning JSON, check:
 - [ ] `create_sprite` has 1–3 costumes; extra costumes use `add_costume`.
 - [ ] `if`/`repeat_until`/`wait_until` conditions are boolean reporters.
 - [ ] `forever` loops include a wait; finite loops use `repeat`.
-- [ ] Green-flag scripts initialize position/direction/size/visibility.
+- [ ] The green flag resets everything the project changes: `pen_clear`
+      before drawing; each changed sprite's position, direction, size,
+      costume, effects, visibility and speech; every variable and list; the
+      backdrop. Resets sit at the top of the looping script, and a revision
+      that moves a start point edits that reset, not only `set_sprite`.
 - [ ] No placeholder values or fields (`PLACEHOLDER_*`, `TBD`, `...`); every
       block, target and menu value is final.
 - [ ] The whole turn is roughly 80 blocks or fewer; pen art is a simple

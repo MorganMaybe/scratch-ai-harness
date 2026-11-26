@@ -742,7 +742,7 @@ def main() -> None:
     parser.add_argument("--replay", metavar="FILE", help="answer from a recorded JSONL fixture instead of the model")
     parser.add_argument("--record", metavar="FILE", help="append every model reply to a JSONL fixture")
     parser.add_argument("--cache", action="store_true", help="cache identical prompts in memory (development)")
-    parser.add_argument("--prompt-budget", type=int, metavar="CHARS", help="prompt/context budget (default 24000)")
+    parser.add_argument("--prompt-budget", type=int, metavar="CHARS", help="prompt/context budget (default 90000)")
     parser.add_argument(
         "--audit",
         choices=("off", "meta", "full"),

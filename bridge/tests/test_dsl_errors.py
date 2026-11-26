@@ -266,10 +266,10 @@ def test_pass_is_rejected():
 # -- expression rejections -----------------------------------------------
 
 
-def test_unary_minus_is_rejected():
+def test_unary_minus_on_a_computed_value_is_still_rejected_for_bitwise():
     assert_diagnostic(
-        body("move(-score)"),
-        "Scratch has no unary minus; write 0 - x",
+        body("move(~score)"),
+        "Scratch has no bitwise operators",
         3,
     )
 
@@ -348,8 +348,8 @@ def test_unknown_function_is_rejected():
 
 def test_python_builtin_is_also_an_unknown_function():
     assert_diagnostic(
-        body("say(str(5))"),
-        "unknown function str()",
+        body("say(min(5, 6))"),
+        "unknown function min()",
         3,
     )
 
@@ -519,18 +519,18 @@ def test_loop_variable_must_be_underscore():
     )
 
 
-def test_two_argument_range_is_rejected():
+def test_three_argument_range_is_rejected():
     assert_diagnostic(
-        body("for _ in range(1, 5):\n    move(1)"),
+        body("for _ in range(1, 5, 2):\n    move(1)"),
         "range(a, b) is not supported yet",
         3,
     )
 
 
-def test_augmented_subtraction_requires_a_literal_with_a_hint():
+def test_unsupported_augmented_operator_keeps_a_hint():
     error = assert_diagnostic(
-        body("score -= amount"),
-        "augmented subtraction only accepts a number literal",
+        body("score //= 2"),
+        "augmented assignment with '//' is not supported",
         3,
     )
     assert error.hint is not None

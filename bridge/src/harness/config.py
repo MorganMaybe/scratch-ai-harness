@@ -325,6 +325,38 @@ def resolve_stop_sequence(
     return False
 
 
+def resolve_eager_context(
+    config_path: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """HARNESS_EAGER_CONTEXT env > harness.ini [harness] eager_context > on.
+
+    On: the first attempt already carries the AI-owned script bodies (within a
+    character budget) and the context packs the request's wording points at,
+    so a revision does not spend a ``load_sprite`` round trip or a replace
+    echo, and a game/clone/scroll/3D request does not spend a ``load_context``
+    round trip.  Off: the lazy-only behaviour (index + load on request).
+    """
+    env = os.environ if env is None else env
+    raw_env = (env.get("HARNESS_EAGER_CONTEXT") or "").strip()
+    if raw_env:
+        return _parse_eager_context(raw_env)
+    path = Path(config_path) if config_path is not None else default_config_path()
+    raw_ini = _read_harness_option(path, "eager_context")
+    if raw_ini:
+        return _parse_eager_context(raw_ini)
+    return True
+
+
+def _parse_eager_context(value: str) -> bool:
+    lowered = value.strip().lower()
+    if lowered in ("on", "true", "1"):
+        return True
+    if lowered in ("off", "false", "0"):
+        return False
+    raise ConfigError("eager_context must be one of: on, true, 1, off, false, 0")
+
+
 def resolve_config(
     profile: str | None = None,
     config_path: str | Path | None = None,

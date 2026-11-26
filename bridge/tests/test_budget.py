@@ -194,7 +194,7 @@ def test_prompt_budget_chars_defaults_when_unset(monkeypatch):
     monkeypatch.delenv("HARNESS_PROMPT_BUDGET", raising=False)
     assert prompt_budget_chars() == DEFAULT_PROMPT_BUDGET
     # Large enough for the curated media index plus the full appendix.
-    assert DEFAULT_PROMPT_BUDGET == 80000
+    assert DEFAULT_PROMPT_BUDGET == 90000
 
 
 def test_estimate_tokens_is_monotonic_and_roughly_quarter_length():

@@ -21,11 +21,17 @@ default=opencode-go
 #                       so the model cannot append prose; flip on only after a
 #                       live ladder A/B shows the provider honours it without
 #                       hurting prompt caching
+#   eager_context=on  - include the AI-owned script bodies (within a budget)
+#                       and the keyword-matched context packs on attempt 1,
+#                       so revisions and game/clone/3D turns skip the
+#                       load_sprite/load_context round trip and the replace
+#                       echo (default on; HARNESS_EAGER_CONTEXT overrides)
 # [harness]
 # generator=json
 # history=on
 # sprite_memory=on
 # stop_sequence=off
+# eager_context=on
 
 [profile:opencode-go]
 # The verified live path (oc_sk_ key).

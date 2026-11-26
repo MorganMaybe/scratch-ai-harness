@@ -115,6 +115,7 @@ def test_dsl_mode_still_accepts_a_dict_reply(monkeypatch):
     assert provider.requests[0].reply_format == "dsl"
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_dsl_mode_accepts_a_raw_json_context_request(monkeypatch):
     monkeypatch.setenv("HARNESS_GENERATOR", "dsl")
     provider = _Replies(

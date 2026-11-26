@@ -51,6 +51,7 @@ def _ensure_media_library(tmp_path_factory: pytest.TempPathFactory) -> None:
     ):
         _write(costumes / relative)
     _write(backdrops / "Space/stars.gif")
+    _write(backdrops / "Space/moon.jpg")
     _write(backdrops / "Nature/grass1.png")
     for index in range(20):
         _write(backdrops / "Nature" / f"background-with-a-long-name-{index:02d}.png")
@@ -96,3 +97,14 @@ def _ensure_media_library(tmp_path_factory: pytest.TempPathFactory) -> None:
         json.dumps(manifest).encode("utf-8"),
     )
     os.environ["HARNESS_MEDIA_ROOT"] = str(root)
+
+
+@pytest.fixture
+def lazy_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run a test on the lazy-only context path (``eager_context = off``).
+
+    The lazy protocol (``load_context``/``load_sprite``, the replace echo) is
+    still the fallback when eager context does not fit or is switched off, so
+    its tests pin it explicitly instead of depending on the default.
+    """
+    monkeypatch.setenv("HARNESS_EAGER_CONTEXT", "off")

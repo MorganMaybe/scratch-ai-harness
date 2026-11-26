@@ -330,6 +330,7 @@ def _detail_context() -> ProjectContext:
     return context
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_load_round_preserves_attempt_prompts_and_records_events(tmp_path):
     store = _store(tmp_path)
     audit = _turn(store)

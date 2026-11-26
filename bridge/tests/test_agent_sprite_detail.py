@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import re
 
 import pytest
@@ -10,6 +12,9 @@ from harness.llm import MockLLM, draw_square_response
 from harness.smalltalk import Sym
 from harness.validator import ValidationError
 
+
+
+pytestmark = pytest.mark.usefixtures("lazy_context")
 
 def context_with_detail(*, user_script: bool = False) -> ProjectContext:
     context = ProjectContext.demo()

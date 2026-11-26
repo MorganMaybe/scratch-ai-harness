@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import pytest
+
 import re
 
 from harness.agent import Agent
 from harness.context import ProjectContext
 from harness.llm import MockLLM, draw_square_response
 
+
+
+pytestmark = pytest.mark.usefixtures("lazy_context")
 
 def test_agent_lazy_loads_a_context_pack():
     provider = MockLLM(

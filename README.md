@@ -187,7 +187,7 @@ Scratch image (Morphic)                     Python bridge (asyncio)
 ```
 
 Every request carries a full project snapshot. The model never sees Python or Smalltalk. It emits a JSON block change set (or a Scratch-Python module in `dsl` mode — see below), and validation runs against the live project, so undo and manual edits get reconciled on the next turn.
-This is a blessing and a curse. mostly a curse. it doesn’t really know what its doing with that. im still tuning it, might change the whole process of doing that if i get some good liquor in.
+DSL is trying to make it more like anything that deekseek has seen before. tuning the model for scratch only got so far, so now it writes in python and thats better (with like five asterisks, mostly that this abstraction from real scratch makes the whole "putting it in actual blocks" debarkle so much worse). alas we must persist with this approach otherwise it will always be making json that it barely understands what it does with. DSL it is.
 
 There is a second reply format: with `generator = dsl` (in `bridge/harness.ini`
 under `[harness]`, or `run_live.ps1 -Generator dsl`), the model answers in a

@@ -148,6 +148,7 @@ def test_resolve_sprite_memory_rejects_unknown_values(tmp_path, value):
 # --- prompts ----------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_memory_off_leaves_prompts_identical_to_today():
     context = context_with_detail()
     baseline = MockLLM([draw_square_response()])
@@ -165,6 +166,7 @@ def test_memory_off_leaves_prompts_identical_to_today():
     assert memory.snapshot() == ["Sprite1"]
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_a_successful_load_is_remembered():
     memory = LoadedSpriteMemory()
     provider = MockLLM(
@@ -179,6 +181,7 @@ def test_a_successful_load_is_remembered():
     assert memory.snapshot() == ["Sprite1"]
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_second_turn_seeds_detail_and_announces_it():
     memory = LoadedSpriteMemory()
     first = MockLLM(
@@ -239,6 +242,7 @@ def test_remembered_names_without_ai_scripts_are_dropped_for_the_turn():
     assert "now included in the system prompt" not in user
 
 
+@pytest.mark.usefixtures("lazy_context")
 def test_bridge_shares_one_memory_across_requests():
     bridge = Bridge(
         Agent(MockLLM([{"load_sprite": ["Sprite1"]}, draw_square_response()]),

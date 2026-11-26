@@ -19,7 +19,11 @@ guessed. Read the reply contract (section 5) before writing code.
 ## Context packs and script detail (load on demand)
 
 The core guide is always included. Optional **context packs** under `context/`
-add specialized detail. If a pack matches the request, load it first by
+add specialized detail. **Check the end of the system prompt first:** under
+"This turn's project-specific context" the bridge often already includes the
+packs the request needs and the exact bodies of the AI-owned scripts. Anything
+listed there is loaded - use it and answer with the module straight away. Only
+when a pack or a sprite's bodies you need are missing, load them first by
 returning JSON **only** (not a python fence):
 
 ```json
@@ -28,10 +32,12 @@ returning JSON **only** (not a python fence):
 ```
 
 The bridge resends with the pack or bodies included. Do not combine these with
-a module; load at most two packs at a time. Packs: `clones` (lifecycle, 300
-limit, bullets/particles/tiles), `games` (score/HUD, game over, platformer and
+a module; load at most two packs at a time. Packs: `clones` (any scene with
+three or more similar things; exact clone semantics, spawners, particles,
+grids, collectibles), `games` (score/HUD, game over, platformer and
 flappy physics), `scrolling` (camera, parallax, tile maps), `pen-3d` (3D
-projection, meshes, pen/frame limits).
+projection, meshes, pen/frame limits), `scenes` (title/menu/play/game-over
+screens driven by a global `scene` number and a `scene_changed` broadcast).
 
 **Loaded packs show block examples in this dialect**, with the same function
 names and argument order as this reference. The JSON blocks you may see in the
@@ -65,9 +71,10 @@ User scripts are read-only and their bodies are omitted. `load_sprite` and
 two lazy-context loads. Request every sprite you will touch in one `load_sprite`
 call; you get at most two load rounds per turn.
 
-Before replacing an AI-owned script whose current body matters, return
-`{"load_sprite": ["Name"], "reason": ...}` first; the bridge resends the
-request with that sprite's exact bodies.
+Before replacing an AI-owned script whose current body matters, make sure its
+exact body is in the prompt: it usually already is (see "Exact current script
+bodies are included below"). Only a sprite that is still listed under "Sprite
+script detail available" needs `{"load_sprite": ["Name"], "reason": ...}`.
 
 ---
 
@@ -102,8 +109,8 @@ one with `create_list`, then use the list functions.
 - Stage is 480x360. `x` is roughly `-240..240`, `y` is roughly `-180..180`.
   Sprites may be partly or fully off-stage.
 - Direction is degrees: `90` = right, `0` = up, `180`/`-180` = down, `-90` =
-  left. Because unary minus is rejected, write `270` for left in a module call
-  and `0 - 90` inside a script.
+  left. Negative numbers are ordinary literals everywhere (`x=-100`,
+  `direction=-90`, `goto_xy(-80, -60)`, `random(-20, 20)`).
 - `size` is a **percent**: `100` is natural size. Stay roughly in `5..300`
   unless the task asks otherwise.
 - Rotation styles: `all around`, `left-right`, `don't rotate`. Use
@@ -187,6 +194,11 @@ def patrol():
 
 - Everything goes between the two fences: no "Here is the module:" before the
   opening fence, no commentary after the closing fence.
+- **Plan in comments.** For anything bigger than a one-script change, open the
+  module with 2-8 `#` comment lines: the sprites and what each one does, the
+  variables and who writes them, the broadcasts, and for a revision which
+  behaviours of the current bodies you keep. Comments are free (the bridge
+  ignores them) and they are the only place to think before you write code.
 - `summary()` and `notes()` go INSIDE the fence, at module level.
 - Exactly ONE fenced block. A second block is an error, even an identical copy.
 - A JSON control message is the JSON object alone: no fence, no prose.
@@ -230,9 +242,9 @@ delete_script(script_id)
   scripts. `delete_sprite` removes an AI-created sprite, or any sprite that has
   no scripts (including the default cat).
   `set_sprite` changes properties at apply time; omitted fields stay unchanged.
-- Negative literals are fine in call arguments (`x=-100`, `random(-20, 20)`,
-  `turn_right(-15)`); unary minus on a computed value is rejected — write
-  `0 - x`. For a left-facing sprite use `direction=270`.
+- Negative literals are fine everywhere, module calls included (`x=-100`,
+  `random(-20, 20)`, `turn_right(-15)`). `-x` on a computed value becomes the
+  `0 - x` subtract block.
 - `=None` in a signature means the argument is optional: omit it. Do not pass
   `None`; the `None` literal itself is rejected.
 - Module-level assignments are not allowed; create variables and lists with
@@ -249,7 +261,7 @@ The decorator names the hat; the function body is the script body.
 def crab1_wander():
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
@@ -290,6 +302,11 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `elif c:` | nested `if` inside `else` |
 | `score = 0` | `set_var("score", 0)` |
 | `score += 1` / `score -= 1` | `change_var("score", 1)` / `change_var("score", -1)` |
+| `vy -= g`, `speed *= 2`, `x /= 2`, `n %= 3` | `set_var` with `subtract`/`multiply`/`divide`/`mod` |
+| `-vx` (computed) | `subtract(0, vx)` |
+| `for _ in range(a, b):` | `repeat` with `count` `b - a` |
+| `dx ** 2` (name or literal), `d ** 0.5` | `multiply(dx, dx)`, `sqrt(d)` |
+| `str(x)`, `float(x)` | `x` (Scratch values are untyped) |
 | bare `score` in an expression | `get_var("score")` |
 | `"Score: " + score` | `join` (any text operand selects `join`, including a chain) |
 | `a + 1`, `a - 1`, `a * 2`, `a / 2`, `a % 2` | `add`, `subtract`, `multiply`, `divide`, `mod` |
@@ -303,22 +320,27 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `sqrt(9)`, `abs(x)`, `round(n)` | the matching Scratch reporter |
 | `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)`, `ln(x)`, `log(x)` | `math_function("<name>", x)` |
 
-- `range(n)` repeats `n` times; the loop variable must be `_`. `range(a, b)` is
-  not supported yet: write `for _ in range(b - a):`.
+- `range(n)` repeats `n` times and `range(a, b)` repeats `b - a` times; the
+  loop variable must be `_` (Scratch `repeat` has no counter - keep your own
+  counter variable when the body needs the index).
 - `while c:` becomes `repeat_until(not c)`, exact because Scratch conditions
   are booleans. Loop counters are variables you initialize before the loop.
-- `+=` accepts an expression; `-=` accepts a number literal only (write
-  `score = score - x` for a reporter).
+- `+=`, `-=`, `*=`, `/=` and `%=` all accept an expression.
 - `not`, `and`, `or`, `if` and `for` are Python keywords: write `not a`,
   `a and b`, `a or b`; never `not(a)`, `and(a, b)` or `if(...)` as calls.
-- Reporters nest freely: `turn_right(random(0 - 20, 20))`,
+- Reporters nest freely: `turn_right(random(-20, 20))`,
   `set_x(x_position() + 5)`, `say("Score: " + score)`.
-- `+` becomes a `join` as soon as either side is text: a string literal, a
-  `join(...)` call, or a `+` that already resolved to join. A chain therefore
-  stays a join end to end: `"Angle " + angle + "  Power " + power`.
-  `+` between two computed values with no text anywhere is still ambiguous
-  and rejected: write `join(a, b)` for text or `add(a, b)` for numbers. A
-  number literal keeps the numeric reading: `a + 1` is `add`.
+- `+` picks `add` or `join` from what it can see: a number literal, a
+  numeric reporter (`y_position()`, `random(...)`, `timer()`, ...) or
+  arithmetic (`vy * 2`) on either side means `add`; a string literal, a
+  `join(...)` call, a text reporter (`costume_name()`, `letter_of`) or a `+`
+  that already resolved to text means `join`, so a chain stays a join end to
+  end: `"Angle " + angle + "  Power " + power`. A bare variable counts when
+  THIS module shows its type (`vy = 0`, `vy -= 1`, `if vy < 3`,
+  `name = "Bob"`). Two bare variables with no such evidence are ambiguous and
+  rejected: write `add(a, b)` or `join(a, b)`. The project is never inspected
+  to guess a type. A number literal keeps the numeric reading: `a + 1` is
+  `add`.
 - Math reporters may be spelled by name: `sin(x)`, `cos(x)`, `tan(x)`,
   `asin(x)`, `acos(x)`, `atan(x)`, `ln(x)`, `log(x)` are exactly
   `math_function("<name>", x)`. `abs`, `sqrt` and `round` already have bare
@@ -341,15 +363,13 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | f-strings (`f"{name}"`) | No f-strings. Use `"a " + name`. | whitelist rejection; use `"a " + name` |
 | `break` / `continue` | No loop break. Use a flag variable and `while not flag:` (or `while flag == 0:` when the condition needs a comparison). | whitelist rejection; use a flag |
 | `pass` | No empty body. Use `wait(0)` or `rest(0.1)`. | whitelist rejection naming the line and construct |
-| unary minus (`-x`, `-20`) | No unary minus. Write `0 - x`. Module args cannot hold `0 - 20`, so use `270` for left and place negative coordinates in a script. | `line {n}: Scratch has no unary minus; write 0 - x.` |
 | chained comparisons (`a < b < c`) | Write `a < b and b < c`. | whitelist rejection; split the comparison |
 | `True` / `False` as conditions | Use `touching(...)`, `key_pressed(...)`, `mouse_down()`, or a comparison (`flag == 1`). | rejection; use a boolean reporter |
 | `None` | No null value. Omit the optional argument or use `0` / `""`. | rejection naming the construct |
-| `**` and `//` | No power or floor-division block. Use `multiply`/`divide` or a repeat loop. | rejection naming the operator |
+| `//`, and `**` other than `name ** 2`/`** 3`/`** 0.5` | No power or floor-division block. Use `multiply`/`divide`/`sqrt` or a repeat loop. | rejection naming the operator |
 | keyword args named like Python keywords | `random(from=1, to=10)` cannot parse. Call `random(1, 10)`. | Python syntax error on that line |
-| `+` between two computed values | Ambiguous (no text operand anywhere in that `+`). Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.` |
+| `+` between two computed values | Ambiguous (no type evidence anywhere in that `+`). Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.` |
 | `atan2(y, x)` | No `atan2` block; `atan` loses the quadrant. Write `math_function("atan", divide(y, x))` for the ratio, then correct the angle when `x` is negative. | `line {n}: unknown function atan2(); ...` plus the rewrite hint |
-| `range(a, b)` | Not supported yet. Write `for _ in range(b - a):`. | `line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.` |
 
 Also rejected: using a command as a value (`set_x(move(10))`), calling an
 unknown function (`draw_line(...)`), leaving a reporter alone as a statement
@@ -434,11 +454,27 @@ These are the behavior notes it does not express.
   `touching`, `key_pressed`, `mouse_down`, ...). `glide(seconds, x, y)`;
   `wait(seconds)`.
 
-### Clones
+### Clones - the default for "many of the same thing"
 
-See the `clones` pack for lifecycle, limits, clone-aware `touching`, and
-bullet/particle/tile patterns. The catalog already lists
-`create_clone(target)`, `delete_clone()` and `@on_clone_start`.
+Three or more similar actors (crabs, stars, coins, enemies, bricks, trees,
+snowflakes) are **one template sprite plus clones**, not copy-pasted sprites
+with copy-pasted scripts: fewer blocks, one script to revise, and
+`touching("Coin")` sees every clone. Keep separate sprites only for distinct
+characters with their own roles, or when the user asked for named sprites.
+
+The essentials (the `clones` pack has the full semantics and patterns):
+
+- `create_clone("myself")` copies the sprite **at that instant** - position,
+  direction, size, costume, effects, visibility and its local variables. So
+  stamp: move the template, set its locals, then clone; `hide()` the template
+  when it is only a stamp, and `show()` first in `@on_clone_start`.
+- Only `@on_clone_start` scripts start in a new clone, but `@on_receive`,
+  `@on_key` and `@on_click` scripts run in every clone too: never spawn clones
+  from those (one broadcast would double the population).
+- Per-clone state (`speed`, `hp`, `scored`) is a sprite-local variable;
+  globals are shared. A clone tests its own collisions
+  (`if touching("Player"):`) and ends with `delete_clone()`.
+- The green flag deletes every clone; at most 300 live, keep it to tens.
 
 ### Motion (sprites only)
 
@@ -549,7 +585,6 @@ bullet/particle/tile patterns. The catalog already lists
 | Scratch 2.0 assets local-only | Imported `Scratch2/` media is not open source | Use locally; do not redistribute or suggest downloads |
 | Stage has no motion/say/size/hide | Stage code is background-only | Put visual behavior on sprites |
 | Module args are literals only | Cannot compute a position or name at apply time | Create at defaults, then set it in a green-flag script |
-| Unary minus is rejected | `x=-100` and `random(-20, 20)` are errors | Write `0 - 100` / `random(0 - 20, 20)`; use `270` for left |
 
 If a request truly needs a missing capability, make the best supported
 approximation and note it in `notes(...)`; do not invent a function or menu
@@ -560,7 +595,7 @@ value.
 ## 9. Planning a large task in one prompt
 
 1. **Scene graph.** List backdrops, actors, props, HUD variables, and which
-   scripts each owns. Prefer at most ~80 blocks: code length is the visible
+   scripts each owns - as the `#` comment plan at the top of the module. Prefer at most ~80 blocks: code length is the visible
    budget. If the scene needs more, return a coherent core subset and put the
    rest in `notes(...)`.
 2. **Media and names.** Pick a backdrop and 1-3 costumes per new sprite from
@@ -572,17 +607,18 @@ value.
 4. **Coordinate.** Use globals + `broadcast`/`@on_receive` for cross-sprite
    events. Direct `touching`/`distance_to`/`goto_sprite`/`point_towards` may
    name an existing sprite. Give each sprite one clear behavior.
-5. **Initialize.** Every green-flag script should set position, direction,
-   size, visibility, costume and its variables. Negative coordinates go in the
-   script, not the module call.
+5. **Reset.** The green flag must rebuild the start state every time: see
+   "Reset on green flag" in section 10 - pen cleared, every changed sprite put
+   back, every variable and list re-initialized.
 6. **Keep scripts small.** One behavior per script; `while True:` + `wait` for
    continuous motion; `for _ in range(n):` for finite loops. Pen art is a few
    line/arc approximations, not one block per pixel.
 7. **Self-check** section 12. **Return one fenced python block only.**
 
-A useful default: a backdrop `set_backdrop`, 2-4 sprites with one
-`wander`/`patrol` script each, a global `score`, and a stage script only when
-the backdrop must change on a timer.
+A useful default: a backdrop `set_backdrop`, one sprite per distinct role
+(player, enemy type, collectible type), clones for every crowd of the same
+thing, a global `score`, and a stage script only when the backdrop must change
+on a timer.
 
 A **game** request (score, lives, jumping, dodging, enemies, win/lose) should
 load the `games` pack first, plus `clones` when it spawns pipes, bullets or
@@ -592,16 +628,66 @@ enemies; do not improvise landing physics without the pack.
 
 ## 10. Reusable patterns
 
-### Green-flag initialization
+### Reset on green flag (every project, every revision)
+
+The green flag is the user's restart button: the second run must look and
+behave exactly like the first. In Scratch 1.4 **nothing resets by itself**
+except clones (the flag deletes them). Pen trails, position, direction, size,
+costume, visibility, graphic effects, speech bubbles, layer order, variables,
+list contents, the backdrop and the timer all keep whatever the last run - or
+the user's dragging - left behind. So the green flag must reset **every piece
+of state the project changes**:
+
+| The project changes... | The green flag resets it with |
+|---|---|
+| pen trails | `pen_clear()` (once, Stage or the drawing sprite), then `pen_up()` and the pen colour/size before any `pen_down()` |
+| where a sprite is / faces | `goto_xy(x, y)`, `point_in_direction(d)` |
+| size, costume, look | `set_size(p)`, `switch_costume("name")`, `clear_effects()` |
+| visibility | `show()` or `hide()` - explicitly, both ways |
+| speech | `say("")` |
+| draw order | `go_to_front()` / `go_back_layers(n)` when layering matters |
+| variables | `score = 0`, `lives = 3`, `game_over = 0` - every variable any script changes |
+| lists | `delete_from_list("all", "queue")`, then refill |
+| backdrop / timer | `switch_backdrop("start")`, `reset_timer()` (Stage) |
 
 ```python
-@on_flag(target="Crab1", label="reset")
-def crab1_reset():
-    goto_xy(0 - 80, 0 - 60)
+@on_flag(target="Stage", label="reset_world")
+def reset_world():
+    pen_clear()
+    switch_backdrop("stars")
+    score = 0
+    game_over = 0
+    reset_timer()
+
+@on_flag(target="Crab", label="crab_run")
+def crab_run():
+    goto_xy(-80, -60)
     point_in_direction(90)
     set_size(40)
+    switch_costume("crab1-a")
+    clear_effects()
+    say("")
     show()
+    while True:
+        move(2)
+        bounce()
+        wait(0.1)
 ```
+
+- **Reset at the top of the script that runs the loop**, before
+  `while True:`. Two `@on_flag` scripts of one sprite start together, so a
+  separate reset script races the loop. Reset each global in exactly one place
+  (the Stage's flag script).
+- **The start position lives in the script.** `create_sprite(x=...)` and
+  `set_sprite(...)` place a sprite once, when the change applies; after a run
+  or a drag only the flag script puts it back. On a revision that moves a
+  starting point ("start lower", "put the cat on the left"), change the
+  `goto_xy` in its reset - a `set_sprite` alone is undone by the next green
+  flag.
+- **A revision that adds state adds its reset**: a new variable, effect, pen
+  drawing, costume change or hidden sprite gets its line in the flag script.
+- Pen drawings start with `pen_clear()` unless the request is to keep drawing
+  over earlier runs.
 
 ### Wander with edge bounce and costume animation
 
@@ -610,7 +696,7 @@ def crab1_reset():
 def crab1_wander():
     while True:
         move(2)
-        turn_right(random(0 - 20, 20))
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
@@ -648,7 +734,7 @@ def score_hud():
 def star_caught():
     score += 1
     play_sound("pop")
-    goto_xy(random(0 - 200, 200), random(0 - 140, 140))
+    goto_xy(random(-200, 200), random(-140, 140))
 ```
 
 Only include `play_sound` if the sound name appears in that sprite's `sounds`
@@ -688,54 +774,42 @@ def crab1_go():
 
 ## 11. Worked examples
 
-### A. A beach with three correctly labelled crabs
+### A. A beach with three wandering crabs (one sprite, clones)
 
 ```python
+# plan: one Crab template (hidden stamp) -> 3 clones at different spots/sizes
+# local speed is set before each create_clone, so every clone keeps its own
 summary("Added a beach backdrop and three wandering crabs.")
 set_backdrop("Nature/beach-malibu.jpg", select=True)
+create_sprite("Crab", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=40, rotation_style="left-right")
+create_variable("speed", scope="sprite", target="Crab", initial=2)
 
-create_sprite("Crab1", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=40, rotation_style="left-right")
-create_sprite("Crab2", costumes=["Animals/crab1-a.png", "Animals/crab1-b.png"], size=35, rotation_style="left-right")
-create_sprite("Crab3", costumes=["Animals/crab2.gif"], direction=270, size=45, rotation_style="left-right")
+@on_flag(target="Crab", label="spawn_crabs")
+def spawn_crabs():
+    hide()
+    goto_xy(-120, -90)
+    for _ in range(3):
+        speed = random(1, 3)
+        set_size(random(30, 45))
+        create_clone("myself")
+        change_x(120)
 
-@on_flag(target="Crab1", label="wander")
-def crab1_wander():
-    goto_xy(0 - 100, 0 - 80)
+@on_clone_start(target="Crab", label="crab_wander")
+def crab_wander():
+    show()
     while True:
-        move(2)
-        turn_right(random(0 - 20, 20))
+        move(speed)
+        turn_right(random(-20, 20))
         bounce()
         next_costume()
         wait(0.2)
-
-@on_flag(target="Crab2", label="wander")
-def crab2_wander():
-    goto_xy(0, 0 - 70)
-    while True:
-        move(2)
-        turn_right(random(0 - 20, 20))
-        bounce()
-        next_costume()
-        wait(0.2)
-
-@on_flag(target="Crab3", label="wander")
-def crab3_wander():
-    goto_xy(100, 0 - 90)
-    point_in_direction(270)
-    while True:
-        move(2)
-        turn_right(random(0 - 20, 20))
-        bounce()
-        next_costume()
-        wait(0.2)
-
-notes("Crab3 uses crab2.gif; the costume name is crab2, never crab1.")
 ```
 
-The library files are `crab1-a.png`, `crab1-b.png`, `crab2.gif`. There is no
-`crab1.png`/`crab1.gif`; do not create a costume called `crab1` from
-`crab2.gif`. Negative coordinates go in the green-flag script because module
-arguments are literals and unary minus is rejected.
+One sprite and two scripts instead of three sprites with three copied
+scripts: "make the crabs faster" is now one `replace_script`, and
+`touching("Crab")` sees all three. The library files are `crab1-a.png`,
+`crab1-b.png` and `crab2.gif`. There is no `crab1.png`/`crab1.gif`; a costume
+made from `crab2.gif` is named `crab2`, never `crab1`.
 
 ### B. Stage backdrop cycle with a timed round
 
@@ -763,7 +837,7 @@ create_sprite("Starfish", costumes=["Animals/starfish1-a.png"], x=0, y=0, direct
 @on_click(target="Starfish", label="caught")
 def starfish_caught():
     score += 1
-    goto_xy(random(0 - 200, 200), random(0 - 140, 140))
+    goto_xy(random(-200, 200), random(-140, 140))
 
 @on_flag(target="Sprite1", label="score_hud")
 def score_hud():
@@ -785,6 +859,9 @@ Before returning the module, check:
 - [ ] Every def has exactly one event decorator and an existing `target`.
 - [ ] Sprites, variables and lists are created in the module **before** the
       defs that use them.
+- [ ] Three or more similar actors are one template sprite plus clones, not
+      copy-pasted sprites; clone templates `hide()` and their clones `show()`,
+      and nothing reachable from a broadcast or key hat spawns clones.
 - [ ] Every new def is an add, or carries `script_id` to replace; never a
       duplicate hat for the same purpose.
 - [ ] Replacing a script whose current body matters has loaded that sprite this
@@ -798,15 +875,20 @@ Before returning the module, check:
       `join(...)` result, or a `+` that already built text) or is written as
       `add(a, b)`; the transpiler does not infer a variable's type from the
       project.
-- [ ] Every `while True:` loop contains a pacing `wait(0.2)`-style call.
+- [ ] Every `while True:` loop yields with a `wait`: `wait(0.03)` for player
+      controls and physics (smooth, ~30 fps), `wait(0.1)`-`wait(0.3)` only for
+      ambient animation such as a wandering crab.
 - [ ] Colors are `#rrggbb` literals; menu values are exact; library paths are
       exact media-index paths with costume names from the file stem.
 - [ ] Only dialect functions are called: no invented functions, no Python
       builtins other than `abs`/`round`/`sqrt`, and no placeholder values
       (`PLACEHOLDER_*`, `TBD`, `...`).
 - [ ] `if`/`wait_until`/`repeat_until` conditions are boolean reporters.
-- [ ] Green-flag scripts initialize position, direction, size, visibility and
-      the variables they own.
+- [ ] The green flag resets everything the project changes: `pen_clear()`
+      before drawing; each changed sprite's position, direction, size,
+      costume, effects, visibility and speech; every variable and list; the
+      backdrop. Resets sit at the top of the looping script, and a revision
+      that moves a start point edits that reset, not only `set_sprite`.
 - [ ] Every `switch_costume`/`switch_backdrop` name exists on that target.
 - [ ] The whole module is roughly 80 blocks or less and the reply is ONE
       fenced python block, ASCII, with no prose and no second object.
@@ -824,9 +906,7 @@ line {n}: {op}() is a command block; it cannot be used as a value.
 line {n}: {op}() is a reporter; it cannot stand alone - assign it to a variable or nest it inside another call.
 line {n}: unknown variable '{name}'; create it first with create_variable("{name}", ...) or use a name from the project context.
 line {n}: '{name}' is a local variable of sprite '{owner}'; another sprite cannot read it - use attribute_of/set_attribute_of or broadcast to a script owned by {owner}.
-line {n}: Scratch has no unary minus; write 0 - x.
 line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.
-line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.
 line {n}: a script def needs exactly one event decorator, for example @on_flag(target="Sprite1").
 ```
 
@@ -838,14 +918,12 @@ What each means:
 - **unknown variable** - create it earlier, or use a context name.
 - **another sprite's local** - do not copy it. Use `attribute_of`/
   `set_attribute_of`/`change_attribute_of`, or broadcast to that sprite.
-- **unary minus** - write `0 - x`. Module args cannot hold `0 - 20`; use `270`
-  for left and put negative coordinates in a script.
 - **duplicate or reserved name** - reuse an existing variable/list; a sprite
   cannot be named `Stage`, `edge` or `mouse-pointer`.
-- **ambiguous `+`** - with no text operand, write `join(a, b)` or `add(a, b)`.
+- **ambiguous `+`** - with no type evidence in that `+`, write `join(a, b)` or
+  `add(a, b)`.
 - **atan2** - no `atan2` block. `math_function("atan", divide(y, x))` is the
   ratio only; correct the angle when `x` is negative (the quadrant).
-- **range(a, b)** - write `for _ in range(b - a):`.
 - **decorator** - every def needs exactly one; a nested/undecorated def should
   become its own script started by `broadcast` + `@on_receive`.
 
