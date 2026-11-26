@@ -204,6 +204,19 @@ class _NoopGuard:
     sprites: list[str]
 
 
+@dataclass(frozen=True)
+class _AckGuard:
+    """One bridge-initiated resend for a bare acknowledgment reply.
+
+    An empty change set is the legal acknowledgment shape, so the validator
+    accepts it.  A summary alone cannot prove the project already satisfies the
+    request, so the guard asks the model to check the current bodies once.
+    """
+
+    prompt: str
+    sprites: list[str]
+
+
 #: Chat/lints wording for a no-op replace stripped from a mixed change set.
 _NOOP_REPLACE_WARNING = (
     "script {label!r} ({target}): replacement identical to the current script"
@@ -289,6 +302,26 @@ def _noop_replace_script_ids(
             script_id, target, label = found
             noops[script_id] = (target, label)
     return noops
+
+
+def _ack_guard_targets(context: ProjectContext) -> dict[str, list[str]]:
+    """Map sprite name -> owned script ids whose exact bodies are available.
+
+    This is the same predicate the lazy-context ``available_sprites`` list uses:
+    a script is checkable only when it is AI-owned and the image sent its native
+    tuples.  A sprite with no such script has nothing the guard could show, so
+    it is omitted (and a project with none skips the guard entirely).
+    """
+    targets: dict[str, list[str]] = {}
+    for name, sprite in context.sprites.items():
+        ids = [
+            script.script_id
+            for script in sprite.scripts
+            if script.owned and script.tuples
+        ]
+        if ids:
+            targets[name] = ids
+    return targets
 
 
 def _strip_noop_replaces(
@@ -479,6 +512,7 @@ class Agent:
         cancel_token: CancelToken | None = None,
         audit: Any = None,
         history: Any = None,
+        sprite_memory: Any = None,
     ):
         self.llm = llm
         self.context = context
@@ -497,6 +531,11 @@ class Agent:
         #: runner records at its own success point.  ``None`` renders exactly
         #: the pre-history prompt.
         self.history = history
+        #: Optional ``harness.sprite_memory.LoadedSpriteMemory``.  The bridge
+        #: shares one instance per process so a follow-up turn starts with the
+        #: sprite detail the previous turns already paid for.  ``None`` keeps
+        #: the old per-turn behavior byte-identical (no seed, no memory write).
+        self.sprite_memory = sprite_memory
 
     def use_context(self, context: ProjectContext) -> None:
         """Adopt the context sent by the image and rebuild the registry from it.
@@ -553,6 +592,31 @@ class Agent:
                 body = sprite_detail_text(only)
             parts.append(f"# Current body: {name}\n" + body)
         return "\n\n".join(parts)
+
+    def _remembered_sprite_names(self) -> list[str]:
+        """Sprite names carried over from earlier turns, filtered to this context.
+
+        Bodies are never cached: every prompt re-renders them from the CURRENT
+        context, so a remembered name can never serve stale blocks.  A name
+        whose sprite lost its AI-owned scripts (undo, a manual edit, a deleted
+        script) is dropped for this turn; the only cost of a stale entry is
+        prompt characters, and an image-side edit surfaces as the new bodies
+        the model sees anyway.
+        """
+        if self.sprite_memory is None:
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for remembered in self.sprite_memory.snapshot():
+            canonical = resolve_sprite_name(self.context, remembered)
+            if canonical is None or canonical in seen:
+                continue
+            sprite = self.context.sprites[canonical]
+            if not any(script.owned and script.tuples for script in sprite.scripts):
+                continue
+            seen.add(canonical)
+            names.append(canonical)
+        return names
 
     def _replace_echo(
         self,
@@ -626,6 +690,39 @@ class Agent:
         )
         return None, stripped, warnings
 
+    def _build_ack_guard(self, request: str, generator: str) -> _AckGuard:
+        """Build the one guard prompt for a zero-change acknowledgment reply."""
+        targets = _ack_guard_targets(self.context)
+        detail = self._echo_detail(targets, generator)
+        prompt = _ack_guard_prompt(request, self.context, detail, generator)
+        return _AckGuard(prompt=prompt, sprites=list(targets))
+
+    def _ack_action(
+        self,
+        request: str,
+        changeset: ChangeSet,
+        generator: str,
+        guard_used: bool,
+        answered_noop_guard: bool,
+    ) -> _AckGuard | None:
+        """Apply the empty-acknowledgment guard to one valid change set.
+
+        A bare acknowledgment gets one guard round trip (when it has not fired
+        yet): the prompt restates the request, shows every current AI-owned
+        body, and offers two honest outs.  An acknowledgment that directly
+        answers a no-op guard prompt needs no second check, because the model
+        was already shown those bodies; it is accepted as-is.  With no
+        AI-owned bodies at all there is nothing to check against, so the
+        acknowledgment is accepted too.
+        """
+        if changeset.changes:
+            return None
+        if guard_used or answered_noop_guard:
+            return None
+        if not _ack_guard_targets(self.context):
+            return None
+        return self._build_ack_guard(request, generator)
+
     def _lint(self, changeset: ChangeSet) -> list[str]:
         """Advisory runtime lints; a lint bug must never fail the turn."""
         try:
@@ -692,12 +789,32 @@ class Agent:
         # environment between turns without restarting the bridge.
         generator = resolve_generator()
         loaded_packs: list[str] = []
-        loaded_sprites: list[str] = []
+        # Seed from the process-wide memory: sprites loaded in earlier turns
+        # ride along so the model does not pay for the same detail twice.  The
+        # names are filtered against the CURRENT context (see
+        # ``_remembered_sprite_names``); the bodies themselves are re-rendered
+        # below, never cached.
+        loaded_sprites: list[str] = self._remembered_sprite_names()
         context_loads = 0
+        #: Lazy-load rounds that actually ran this turn, in order.  The audit
+        #: records them so a multi-load turn can be reconstructed from the
+        #: bundle: which round loaded what, against which attempt.
+        load_events: list[dict[str, Any]] = []
         system = self._system_prompt(loaded_packs, loaded_sprites, generator)
         user, user_meta = build_user_prompt_with_meta(
             request, self.context, generator=generator, history=self.history
         )
+        if loaded_sprites:
+            # Announce the carried-over detail in the same shape as a load
+            # acknowledgement so the model knows it is already in the system
+            # prompt and does not ask for it again.  The rest of the prompt is
+            # the ordinary first-turn prompt (history, generator tail), so a
+            # seeded turn keeps every other section.
+            names = _loaded_context_names(loaded_packs, loaded_sprites)
+            user = (
+                f"The requested context is now included in the system prompt: "
+                f"{names}.\n\n" + user
+            )
         if self.audit is not None:
             system_info = analyze_system_prompt(system)
             system_info["context_packs"] = list(loaded_packs)
@@ -732,10 +849,26 @@ class Agent:
         #: current script normally gets one resend offering the two honest
         #: outs; after it, identical replacements are stripped with warnings.
         noop_guard_used = False
+        #: Set while a no-op guard prompt is the pending ask; the next reply is
+        #: answering evidence the model was already shown.  A bare
+        #: acknowledgment there is accepted without the ack guard.
+        noop_guard_pending = False
+        #: One empty-acknowledgment guard per turn.  A summary-only reply that
+        #: claims the request is already satisfied gets one resend checking it
+        #: against the current bodies.
+        ack_guard_used = False
+        #: The first duplicate lazy-load request in a turn is a free nudge that
+        #: names the already-included detail; the second one is charged.
+        duplicate_load_nudges = 0
         attempt = 0
 
         for attempt in range(
-            1, self.max_repairs + 3 + _MAX_CONTEXT_LOADS + 1
+            1,
+            # first attempt + echo + no-op guard + ack guard + duplicate nudge
+            self.max_repairs
+            + 5
+            + _MAX_CONTEXT_LOADS
+            + 1,
         ):
             #: What this attempt failed on: "validation" when the failure came
             #: from ``validate_changeset``, "parse" for anything else, "none"
@@ -785,6 +918,9 @@ class Agent:
                 # it, so give the model one more chance with a repair prompt.
                 if exc.code != "bad_json":
                     raise
+                # The guard round was answered with an unusable payload, so a
+                # later acknowledgment must not inherit its evidence check.
+                noop_guard_pending = False
                 detail = exc.message
                 if getattr(exc, "finish_reason", None) == "length":
                     detail += " (finish_reason=length, output budget exhausted)"
@@ -824,6 +960,14 @@ class Agent:
             # The provider may have answered while the client was cancelling:
             # discard that reply before it can become a result or touch state.
             _raise_if_cancelled(token)
+
+            #: Whether this reply answers the no-op guard prompt sent above.
+            #: A bare acknowledgment here was already evidence-checked (the
+            #: model saw the current bodies), so the ack guard stays out of it.
+            #: A load request consumes the flag too: it did not answer the
+            #: guard, so a later acknowledgment must still face the check.
+            answered_noop_guard = noop_guard_pending
+            noop_guard_pending = False
 
             # In DSL mode the reply payload is a raw Scratch-Python module.
             # A JSON object is still accepted (control channel or a model
@@ -884,6 +1028,7 @@ class Agent:
             context_issue: ValidationIssue | None = None
             packs_to_load: list[str] = []
             sprites_to_load: list[str] = []
+            duplicate_names: list[str] = []
             try:
                 context_request = parse_context_request(reply.data)
             except IRError as exc:
@@ -937,10 +1082,12 @@ class Agent:
                         "load_context", "; ".join(problems)
                     )
                 elif not new_packs and not new_sprites:
-                    context_issue = ValidationIssue(
-                        "load_context",
-                        "that context is already loaded; return the change set",
-                    )
+                    # Every named entry is already in this turn's prompt.  The
+                    # first such nudge is free (a load request is a model call,
+                    # not a repair); a repeat is charged below.
+                    duplicate_names = [
+                        f"context pack {name}" for name in context_request.packs
+                    ] + [f"sprite {name}" for name in resolved_sprites]
                 elif context_loads >= _MAX_CONTEXT_LOADS:
                     context_issue = ValidationIssue(
                         "load_context",
@@ -950,6 +1097,35 @@ class Agent:
                 else:
                     packs_to_load = new_packs
                     sprites_to_load = new_sprites
+            if duplicate_names:
+                names = ", ".join(duplicate_names)
+                if duplicate_load_nudges == 0:
+                    # Zero-cost nudge: no repair counter moves, and the same
+                    # detail stays in the system prompt the model already has.
+                    duplicate_load_nudges += 1
+                    issue = ValidationIssue(
+                        "load_context",
+                        "that context is already loaded; repeated request: "
+                        + names,
+                    )
+                    last_issues = [issue]
+                    if self.audit is not None:
+                        self.audit.write_attempt(
+                            attempt,
+                            user_prompt=user,
+                            reply=reply,
+                            parse_error=str(issue),
+                            issues=last_issues,
+                        )
+                    _raise_if_cancelled(token)
+                    user = _duplicate_load_prompt(
+                        request, self.context, names, loaded_sprites
+                    )
+                    continue
+                context_issue = ValidationIssue(
+                    "load_context",
+                    "that context is already loaded; return the change set",
+                )
             if context_issue is not None:
                 last_issues = [context_issue]
                 if self.audit is not None:
@@ -971,9 +1147,21 @@ class Agent:
             if packs_to_load or sprites_to_load:
                 loaded_packs.extend(packs_to_load)
                 loaded_sprites.extend(sprites_to_load)
+                if self.sprite_memory is not None and sprites_to_load:
+                    # Persist only once the round succeeded: a rejected load
+                    # never teaches the next turn to skip it.
+                    self.sprite_memory.remember(sprites_to_load)
                 context_loads += 1
+                load_events.append(
+                    {
+                        "attempt": attempt,
+                        "packs": list(packs_to_load),
+                        "sprites": list(sprites_to_load),
+                    }
+                )
                 fragment_mode = False
                 system = self._system_prompt(loaded_packs, loaded_sprites, generator)
+                answered_prompt = user
                 user = _context_loaded_prompt(
                     request, self.context, packs_to_load, sprites_to_load
                 )
@@ -990,9 +1178,16 @@ class Agent:
                             "sprite_details": list(loaded_sprites),
                             "level": 0,
                             "context_chars": len(self.context.summary_text()),
+                            "load_events": [dict(event) for event in load_events],
                         },
                     )
-                    self.audit.write_attempt(attempt, user_prompt=user, reply=reply)
+                    # The attempt answered the prompt as it stood BEFORE the
+                    # load, so that is what belongs under this attempt number;
+                    # the refreshed prompt is the next attempt's, and lands in
+                    # prompts/user-(NN+1).txt when that attempt is recorded.
+                    self.audit.write_attempt(
+                        attempt, user_prompt=answered_prompt, reply=reply
+                    )
                 continue
 
             if dsl_diagnostics:
@@ -1054,6 +1249,17 @@ class Agent:
                     if merged is not None and not last_issues
                     else (None, merged, [])
                 )
+                ack = (
+                    self._ack_action(
+                        request,
+                        merged,
+                        generator,
+                        ack_guard_used,
+                        answered_noop_guard,
+                    )
+                    if merged is not None and not last_issues and guard is None
+                    else None
+                )
                 echo = (
                     self._replace_echo(
                         request,
@@ -1067,6 +1273,7 @@ class Agent:
                         and not last_issues
                         and not echo_used
                         and guard is None
+                        and ack is None
                     )
                     else None
                 )
@@ -1083,13 +1290,21 @@ class Agent:
                         echo_sprites=echo.sprites if echo is not None else None,
                         noop_guard=guard is not None,
                         noop_sprites=guard.sprites if guard is not None else None,
+                        ack_guard=ack is not None,
+                        ack_sprites=ack.sprites if ack is not None else None,
                     )
                 fragment_mode = False
                 if merged is not None and not last_issues:
                     if guard is not None:
                         noop_guard_used = True
+                        noop_guard_pending = True
                         _raise_if_cancelled(token)
                         user = guard.prompt
+                        continue
+                    if ack is not None:
+                        ack_guard_used = True
+                        _raise_if_cancelled(token)
+                        user = ack.prompt
                         continue
                     if echo is not None:
                         echo_used = True
@@ -1148,6 +1363,17 @@ class Agent:
                     if not last_issues
                     else (None, changeset, [])
                 )
+                ack = (
+                    self._ack_action(
+                        request,
+                        changeset,
+                        generator,
+                        ack_guard_used,
+                        answered_noop_guard,
+                    )
+                    if not last_issues and guard is None
+                    else None
+                )
                 echo = (
                     self._replace_echo(
                         request,
@@ -1156,7 +1382,10 @@ class Agent:
                         generator,
                         dsl_source or "",
                     )
-                    if not last_issues and not echo_used and guard is None
+                    if not last_issues
+                    and not echo_used
+                    and guard is None
+                    and ack is None
                     else None
                 )
                 if self.audit is not None:
@@ -1171,14 +1400,22 @@ class Agent:
                         echo_sprites=echo.sprites if echo is not None else None,
                         noop_guard=guard is not None,
                         noop_sprites=guard.sprites if guard is not None else None,
+                        ack_guard=ack is not None,
+                        ack_sprites=ack.sprites if ack is not None else None,
                         envelope_actions=list(dsl_envelope_actions),
                         envelope_fatal=dsl_envelope_fatal,
                     )
                 if not last_issues:
                     if guard is not None:
                         noop_guard_used = True
+                        noop_guard_pending = True
                         _raise_if_cancelled(token)
                         user = guard.prompt
+                        continue
+                    if ack is not None:
+                        ack_guard_used = True
+                        _raise_if_cancelled(token)
+                        user = ack.prompt
                         continue
                     if echo is not None:
                         echo_used = True
@@ -1275,6 +1512,17 @@ class Agent:
                         if not last_issues
                         else (None, changeset, [])
                     )
+                    ack = (
+                        self._ack_action(
+                            request,
+                            changeset,
+                            generator,
+                            ack_guard_used,
+                            answered_noop_guard,
+                        )
+                        if not last_issues and guard is None
+                        else None
+                    )
                     echo = (
                         self._replace_echo(
                             request,
@@ -1283,7 +1531,10 @@ class Agent:
                             generator,
                             json.dumps(reply.data, indent=2),
                         )
-                        if not last_issues and not echo_used and guard is None
+                        if not last_issues
+                        and not echo_used
+                        and guard is None
+                        and ack is None
                         else None
                     )
                     if self.audit is not None:
@@ -1296,12 +1547,20 @@ class Agent:
                             echo_sprites=echo.sprites if echo is not None else None,
                             noop_guard=guard is not None,
                             noop_sprites=guard.sprites if guard is not None else None,
+                            ack_guard=ack is not None,
+                            ack_sprites=ack.sprites if ack is not None else None,
                         )
                     if not last_issues:
                         if guard is not None:
                             noop_guard_used = True
+                            noop_guard_pending = True
                             _raise_if_cancelled(token)
                             user = guard.prompt
+                            continue
+                        if ack is not None:
+                            ack_guard_used = True
+                            _raise_if_cancelled(token)
+                            user = ack.prompt
                             continue
                         if echo is not None:
                             echo_used = True
@@ -1856,19 +2115,92 @@ is checked once per turn before the change set is applied.
 """
 
 
+def _ack_guard_prompt(
+    request: str,
+    context: ProjectContext,
+    detail: str,
+    generator: str = "json",
+) -> str:
+    """The one bridge-initiated resend for a summary-only acknowledgment.
+
+    An empty change set is the legal acknowledgment shape, but a summary alone
+    cannot prove the project already satisfies the request.  The model gets two
+    legitimate ways on: confirm it against every current AI-owned body below
+    and resend the acknowledgment, or make the change now.
+    """
+    # The acknowledgment shape is shared with the no-op guard: an empty change
+    # list, or a module with only summary/notes calls.
+    acknowledgment = (
+        _NOOP_GUARD_ACK_DSL if generator == "dsl" else _NOOP_GUARD_ACK_JSON
+    )
+    return f"""User request:
+{request}
+
+Project context:
+{context.summary_text(generator)}
+
+Current bodies of the AI-owned scripts in this project:
+{detail}
+
+You returned no changes: only a summary and notes. That is the acknowledgment
+shape the bridge accepts, and a summary alone cannot show that the project
+already satisfies the request.
+
+Choose one:
+1. If the current project genuinely already satisfies the request, return the
+   acknowledgment reply alone again: {acknowledgment}. The bridge accepts it
+   and applies nothing.
+2. Otherwise make the change the request actually asks for now, then return the
+   complete change set.
+
+This guard exists because an empty change set is accepted as an acknowledgment;
+it is checked once per turn before the reply is accepted.
+"""
+
+
+def _duplicate_load_prompt(
+    request: str,
+    context: ProjectContext,
+    names: str,
+    loaded_sprites: list[str],
+) -> str:
+    """The free first nudge for a lazy-load request already satisfied above.
+
+    It reuses the load acknowledgement shape (so the model sees the same
+    ``now included`` header it gets after a real load) and names the repeated
+    request so the model can stop asking.  The duplicate costs no repair; a
+    second one in the same turn falls back to :func:`_context_error_prompt`.
+    """
+    base = _context_loaded_prompt(request, context, [], loaded_sprites)
+    return base + (
+        f"\nYou asked again for context that is already loaded: {names}. That "
+        "detail is already included above. Do not request it again - return "
+        "the change set now.\n"
+    )
+
+
+def _loaded_context_names(packs: list[str], sprites: list[str] | None) -> str:
+    """The ``"context pack(s): ...; sprite detail: ..."`` announcement names."""
+    loaded: list[str] = []
+    if packs:
+        loaded.append("context pack(s): " + ", ".join(packs))
+    if sprites:
+        loaded.append("sprite detail: " + ", ".join(sprites))
+    return "; ".join(loaded)
+
+
 def _context_loaded_prompt(
     request: str,
     context: ProjectContext,
     packs: list[str],
     sprites: list[str] | None = None,
 ) -> str:
-    loaded: list[str] = []
-    if packs:
-        loaded.append("context pack(s): " + ", ".join(packs))
-    if sprites:
-        loaded.append("sprite detail: " + ", ".join(sprites))
-    names = "; ".join(loaded)
-    return f"""The requested context is now included in the system prompt: {names}.
+    names = _loaded_context_names(packs, sprites)
+    if names:
+        header = f"The requested context is now included in the system prompt: {names}."
+    else:
+        header = "The requested context is already in the system prompt."
+    return f"""{header}
 
 User request:
 {request}

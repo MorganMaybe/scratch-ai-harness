@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from harness.agent import Agent
 from harness.context import ProjectContext, ScriptSummary
 from harness.llm import MockLLM, draw_square_response
 from harness.smalltalk import Sym
+from harness.validator import ValidationError
 
 
 def context_with_detail(*, user_script: bool = False) -> ProjectContext:
@@ -156,3 +159,90 @@ def test_sprite_detail_extends_the_prompt_budget(monkeypatch):
     assert len(with_detail) > len(plain)
     assert "# Loaded sprite detail: Sprite1" in with_detail
     assert not re.search(r"\[context appendix truncated \d+ chars\]", with_detail)
+
+
+# --- duplicate loads do not eat the repair budget --------------------------
+
+
+def test_first_duplicate_load_is_a_free_nudge():
+    # max_repairs=1: the duplicate must cost nothing, a later parse failure
+    # spends the one repair, and the following validation failure earns the
+    # extra validation repair.  If the duplicate had been charged, the parse
+    # failure would exhaust the budget first and attempts would stop at four.
+    invalid = {
+        "summary": "Bad block.",
+        "changes": [
+            {
+                "action": "add_script",
+                "target": "Sprite1",
+                "label": "bad",
+                "hat": {"op": "when_flag_clicked"},
+                "body": [{"op": "move_to", "args": {}}],
+            }
+        ],
+    }
+    provider = MockLLM(
+        [
+            {"load_sprite": ["Sprite1"], "reason": "need the bounce body"},
+            {"load_sprite": ["sprite1"]},
+            {"summary": "missing the changes array"},
+            invalid,
+            draw_square_response(),
+        ]
+    )
+    agent = Agent(provider, context_with_detail(), max_repairs=1)
+
+    result = agent.handle("Revise it.", request_id=28)
+
+    assert result.attempts == 5
+    assert len(provider.calls) == 5
+    # Attempt 3 was the free nudge, not a charged repair prompt.
+    assert "already loaded" in provider.calls[2][1]
+    assert "detail is already included above" in provider.calls[2][1]
+    assert "request was not usable" not in provider.calls[2][1]
+    # Attempt 4 was the ordinary parse repair.
+    assert "previous response was not a valid change set" in provider.calls[3][1]
+    # Attempt 5 was the earned validation repair (a fragment repair here).
+    assert "could not be used" in provider.calls[4][1]
+    assert result.compiled.changes[0].action == "add_script"
+
+
+def test_second_duplicate_load_is_charged():
+    provider = MockLLM(
+        [
+            {"load_sprite": ["Sprite1"], "reason": "need the bounce body"},
+            {"load_sprite": ["sprite1"]},
+            {"load_sprite": ["Sprite1"]},
+            draw_square_response(),
+        ]
+    )
+    agent = Agent(provider, context_with_detail(), max_repairs=1)
+
+    result = agent.handle("Revise it.", request_id=29)
+
+    assert result.attempts == 4
+    # The first duplicate got the free nudge; the second got the charged
+    # context-error repair prompt.
+    assert "already loaded" in provider.calls[2][1]
+    assert "detail is already included above" in provider.calls[2][1]
+    assert "request was not usable" in provider.calls[3][1]
+
+
+def test_second_duplicate_load_consumes_the_only_repair():
+    # With no repair budget the second duplicate cannot be nudged again, so the
+    # turn fails instead of reaching the good third reply.
+    provider = MockLLM(
+        [
+            {"load_sprite": ["Sprite1"]},
+            {"load_sprite": ["sprite1"]},
+            {"load_sprite": ["Sprite1"]},
+            draw_square_response(),
+        ]
+    )
+    agent = Agent(provider, context_with_detail(), max_repairs=0)
+
+    with pytest.raises(ValidationError):
+        agent.handle("Revise it.", request_id=30)
+
+    assert len(provider.calls) == 3
+    assert "already loaded" in provider.calls[2][1]

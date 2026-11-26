@@ -62,7 +62,8 @@ matter and say in `notes` what you deliberately drop. If no index is
 shown, exact bodies are unavailable: revise from ids, labels, hats and counts.
 User scripts are read-only and their bodies are omitted. `load_sprite` and
 `load_context` may be combined, never with a module, and the turn is limited to
-two lazy-context loads.
+two lazy-context loads. Request every sprite you will touch in one `load_sprite`
+call; you get at most two load rounds per turn.
 
 Before replacing an AI-owned script whose current body matters, return
 `{"load_sprite": ["Name"], "reason": ...}` first; the bridge resends the
@@ -226,7 +227,8 @@ delete_script(script_id)
 - `create_sprite` takes `costumes` (1-3 library paths) or `preset`, not both.
   A preset supplies its costumes and defaults; the file stem names a costume.
 - `duplicate_sprite` copies costumes, variables and properties, **not**
-  scripts. `delete_sprite` removes an AI-created sprite and its scripts.
+  scripts. `delete_sprite` removes an AI-created sprite, or any sprite that has
+  no scripts (including the default cat).
   `set_sprite` changes properties at apply time; omitted fields stay unchanged.
 - Negative literals are fine in call arguments (`x=-100`, `random(-20, 20)`,
   `turn_right(-15)`); unary minus on a computed value is rejected — write
@@ -289,7 +291,7 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `score = 0` | `set_var("score", 0)` |
 | `score += 1` / `score -= 1` | `change_var("score", 1)` / `change_var("score", -1)` |
 | bare `score` in an expression | `get_var("score")` |
-| `"Score: " + score` | `join` (a string literal on either side selects `join`) |
+| `"Score: " + score` | `join` (any text operand selects `join`, including a chain) |
 | `a + 1`, `a - 1`, `a * 2`, `a / 2`, `a % 2` | `add`, `subtract`, `multiply`, `divide`, `mod` |
 | `a < b`, `a > b`, `a == b` | `less_than`, `greater_than`, `equals` |
 | `a != b` | `not(equals(a, b))` |
@@ -299,6 +301,7 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `move(x_position() + 10)` | a reporter nested as an argument |
 | `random(1, 10)` | `pick random`; both bounds positional |
 | `sqrt(9)`, `abs(x)`, `round(n)` | the matching Scratch reporter |
+| `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)`, `ln(x)`, `log(x)` | `math_function("<name>", x)` |
 
 - `range(n)` repeats `n` times; the loop variable must be `_`. `range(a, b)` is
   not supported yet: write `for _ in range(b - a):`.
@@ -310,10 +313,20 @@ annotations. A plain or nested def, or two decorators, is rejected.
   `a and b`, `a or b`; never `not(a)`, `and(a, b)` or `if(...)` as calls.
 - Reporters nest freely: `turn_right(random(0 - 20, 20))`,
   `set_x(x_position() + 5)`, `say("Score: " + score)`.
-- `+` between two computed values is ambiguous and rejected. Write `join(a, b)`
-  for text or `add(a, b)` for numbers. One literal disambiguates: `a + 1` is
-  numeric; `"Score: " + score` is a join. The transpiler never inspects the
-  project to guess a variable's type, so mark every non-literal case yourself.
+- `+` becomes a `join` as soon as either side is text: a string literal, a
+  `join(...)` call, or a `+` that already resolved to join. A chain therefore
+  stays a join end to end: `"Angle " + angle + "  Power " + power`.
+  `+` between two computed values with no text anywhere is still ambiguous
+  and rejected: write `join(a, b)` for text or `add(a, b)` for numbers. A
+  number literal keeps the numeric reading: `a + 1` is `add`.
+- Math reporters may be spelled by name: `sin(x)`, `cos(x)`, `tan(x)`,
+  `asin(x)`, `acos(x)`, `atan(x)`, `ln(x)`, `log(x)` are exactly
+  `math_function("<name>", x)`. `abs`, `sqrt` and `round` already have bare
+  spellings; `e ^` and `10 ^` have no bare form, so write
+  `math_function("e ^", x)`.
+- There is no `atan2(y, x)`. `math_function("atan", divide(y, x))` gives the
+  ratio's angle only; unlike `atan2` it loses the quadrant, so correct the
+  angle yourself when `x` is negative.
 - `==`/`!=` compare as Scratch `equals`. Division is Scratch division; `//` is
   not supported.
 
@@ -334,7 +347,8 @@ annotations. A plain or nested def, or two decorators, is rejected.
 | `None` | No null value. Omit the optional argument or use `0` / `""`. | rejection naming the construct |
 | `**` and `//` | No power or floor-division block. Use `multiply`/`divide` or a repeat loop. | rejection naming the operator |
 | keyword args named like Python keywords | `random(from=1, to=10)` cannot parse. Call `random(1, 10)`. | Python syntax error on that line |
-| `+` between two computed values | Ambiguous. Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.` |
+| `+` between two computed values | Ambiguous (no text operand anywhere in that `+`). Write `join(a, b)` or `add(a, b)`. | `line {n}: '+' between two computed values is ambiguous in Scratch: a + b. Write add(a, b) to add numbers or join(a, b) to build text.` |
+| `atan2(y, x)` | No `atan2` block; `atan` loses the quadrant. Write `math_function("atan", divide(y, x))` for the ratio, then correct the angle when `x` is negative. | `line {n}: unknown function atan2(); ...` plus the rewrite hint |
 | `range(a, b)` | Not supported yet. Write `for _ in range(b - a):`. | `line {n}: range(a, b) is not supported yet; write for _ in range(b - a) instead.` |
 
 Also rejected: using a command as a value (`set_x(move(10))`), calling an
@@ -503,6 +517,13 @@ bullet/particle/tile patterns. The catalog already lists
 - Arithmetic/comparison reporters take `any` and nest. `random(from, to)` is an
   integer; pass both positionally (`random(1, 10)`).
 - `join(a, b)`; `letter_of(index, string)`; `string_length(string)`.
+- `+` builds text once any operand is text, so a chain such as
+  `"Angle " + angle + "  Power " + power` nests joins without an explicit
+  `join(...)`. Without text, `+` needs `add(a, b)`.
+- `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)`, `ln(x)` and
+  `log(x)` are sugar for `math_function("<name>", x)`; `abs`/`sqrt`/`round`
+  are already bare. `e ^` and `10 ^` need the explicit `math_function` call.
+  There is no `atan2`.
 - `set_var("name", value)`, `change_var("name", delta)`, `get_var("name")`
   exist, but prefer bare names. `name` is a string there.
 - A sprite sees its own variables plus globals, not another sprite's locals.
@@ -773,8 +794,9 @@ Before returning the module, check:
 - [ ] Every variable is created or known from the context, and no script reads
       another sprite's local variable. Create each name once: a name already in
       the context or created earlier in the module is reused, never re-created.
-- [ ] Every `+` with two non-literal operands is marked as `add(a, b)` or
-      `join(a, b)`; the transpiler does not infer a variable's type from the
+- [ ] Every `+` between non-literal values either has a text operand (string,
+      `join(...)` result, or a `+` that already built text) or is written as
+      `add(a, b)`; the transpiler does not infer a variable's type from the
       project.
 - [ ] Every `while True:` loop contains a pacing `wait(0.2)`-style call.
 - [ ] Colors are `#rrggbb` literals; menu values are exact; library paths are
@@ -820,7 +842,9 @@ What each means:
   for left and put negative coordinates in a script.
 - **duplicate or reserved name** - reuse an existing variable/list; a sprite
   cannot be named `Stage`, `edge` or `mouse-pointer`.
-- **ambiguous `+`** - write `join(a, b)` or `add(a, b)`.
+- **ambiguous `+`** - with no text operand, write `join(a, b)` or `add(a, b)`.
+- **atan2** - no `atan2` block. `math_function("atan", divide(y, x))` is the
+  ratio only; correct the angle when `x` is negative (the quadrant).
 - **range(a, b)** - write `for _ in range(b - a):`.
 - **decorator** - every def needs exactly one; a nested/undecorated def should
   become its own script started by `broadcast` + `@on_receive`.

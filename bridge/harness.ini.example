@@ -8,12 +8,15 @@
 default=opencode-go
 
 # Reply generator, conversation memory and stop sequence. HARNESS_GENERATOR /
-# HARNESS_HISTORY / HARNESS_STOP_SEQUENCE override these values.
+# HARNESS_HISTORY / HARNESS_SPRITE_MEMORY / HARNESS_STOP_SEQUENCE override these
+# values.
 #   generator=json - the model returns the JSON change-set object (current default)
 #   generator=dsl  - the model returns one fenced Scratch-Python module, which the
 #                    bridge transpiles into the same change set
 #   history=on     - include acked turns in the prompt (default)
 #   history=off    - stateless prompts, byte-identical to the pre-history bridge
+#   sprite_memory=on  - carry loaded sprite detail into later turns (default)
+#   sprite_memory=off - per-turn loads only, prompts identical to the old bridge
 #   stop_sequence=off - (dsl only) send a stop sequence after the closing fence,
 #                       so the model cannot append prose; flip on only after a
 #                       live ladder A/B shows the provider honours it without
@@ -21,6 +24,7 @@ default=opencode-go
 # [harness]
 # generator=json
 # history=on
+# sprite_memory=on
 # stop_sequence=off
 
 [profile:opencode-go]

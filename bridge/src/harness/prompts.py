@@ -180,9 +180,11 @@ Sprites, stage and media:
 - create_sprite needs "name" and 1-3 "costumes" or a "preset" (supplies
   costumes, rotation centers, defaults); x/y/direction/size/visible/
   rotation_style override. Defaults 0,0,90,100,true,"all around".
-- delete_sprite and duplicate_sprite work only on AI-created sprites. User
-  sprites may receive scripts and costumes but cannot be deleted, renamed or
-  duplicated over.
+- delete_sprite works on AI-created sprites and on any sprite with no
+  scripts (including the default cat). User sprites that still have scripts
+  cannot be deleted. duplicate_sprite works only on AI-created sprites; user
+  sprites may receive scripts and costumes but cannot be renamed or duplicated
+  over.
 - add_costume adds library media to an existing sprite (or the stage); set
   "select" true to make it the visible costume.
 - set_backdrop adds a library backdrop to the stage and selects it by default.
@@ -341,9 +343,11 @@ Sprites, stage and media:
 - create_sprite needs a name and 1-3 costumes or a preset (supplies costumes,
   rotation centers, defaults); x/y/direction/size/visible/rotation_style
   override. Defaults 0,0,90,100,true,"all around".
-- delete_sprite and duplicate_sprite work only on AI-created sprites. User
-  sprites may receive scripts and costumes but cannot be deleted, renamed or
-  duplicated over.
+- delete_sprite works on AI-created sprites and on any sprite with no
+  scripts (including the default cat). User sprites that still have scripts
+  cannot be deleted. duplicate_sprite works only on AI-created sprites; user
+  sprites may receive scripts and costumes but cannot be renamed or duplicated
+  over.
 - add_costume adds library media to an existing sprite (or the stage); select
   true makes it the visible costume.
 - set_backdrop adds a library backdrop to the stage and selects it by default.

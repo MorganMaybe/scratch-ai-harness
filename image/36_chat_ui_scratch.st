@@ -156,7 +156,8 @@ on the visible page."
     self extent: 280 @ 18.
     ^ self' classified: 'initialization'.
 
-"Enter sends; Shift+Enter inserts a newline.  Every other key uses the normal
+"Enter sends; Shift+Enter inserts a newline.  Up/Down arrows recall previous
+prompts into the input like a command line.  Every other key uses the normal
 MultilineStringMorph editing path (including the Alt+V paste trap workaround)."
 (Smalltalk at: #AIHarnessChatInputMorph) compile: 'keyStroke: evt
     | ch pane |
@@ -171,7 +172,42 @@ MultilineStringMorph editing path (including the Alt+V paste trap workaround)."
                 pane := self ownerThatIsA: (Smalltalk at: #AIHarnessChatMorph).
                 pane ifNotNil: [pane sendFromChat].
                 ^ self]].
+    (ch = 30) ifTrue: [
+        (self recallStep: 1) ifTrue: [^ self]].
+    (ch = 31) ifTrue: [
+        (self recallStep: -1) ifTrue: [^ self]].
     ^ super keyStroke: evt' classified: 'events'.
+
+(Smalltalk at: #AIHarnessChatInputMorph) compile: 'recallStep: delta
+    "Up (delta 1) steps to an older prompt, Down (delta -1) to a newer one.
+    Answer true when the key was consumed."
+    | pane hist idx draft |
+    pane := self ownerThatIsA: (Smalltalk at: #AIHarnessChatMorph).
+    pane ifNil: [^ false].
+    hist := (Smalltalk at: #AIHarness) promptHistory.
+    delta > 0 ifTrue: [
+        hist isEmpty ifTrue: [^ false].
+        idx := (Smalltalk at: #AIHarness) promptRecallIndex.
+        idx == nil ifTrue: [
+            (Smalltalk at: #AIHarness) draftPrompt: self contents asString.
+            idx := hist size + 1].
+        idx > 1 ifTrue: [idx := idx - 1].
+        (Smalltalk at: #AIHarness) promptRecallIndex: idx.
+        pane setInputText: (hist at: idx).
+        ^ true].
+    idx := (Smalltalk at: #AIHarness) promptRecallIndex.
+    idx == nil ifTrue: [^ false].
+    idx := idx + 1.
+    idx > hist size
+        ifTrue: [
+            (Smalltalk at: #AIHarness) promptRecallIndex: nil.
+            draft := (Smalltalk at: #AIHarness) draftPrompt.
+            draft ifNil: [draft := ''''].
+            pane setInputText: draft]
+        ifFalse: [
+            (Smalltalk at: #AIHarness) promptRecallIndex: idx.
+            pane setInputText: (hist at: idx)].
+    ^ true' classified: 'events'.
 
 (Smalltalk at: #AIHarnessChatInputMorph) compile: 'contents: aString
     | pane |
@@ -1273,6 +1309,42 @@ tab pane in the normal submorph pass and draw it after the frame."
         (pane isKindOf: AIHarnessChatMorph) and: [pane pending]])
             ifTrue: [^ self cancelCurrentSend].
     ^ self sendFromChat' classified: 'chat'.
+
+(Smalltalk at: #AIHarness) class compile: 'promptHistory
+    "Sent prompts, oldest first.  Kept in Smalltalk globals so the history
+    survives UI reloads, which rebuild the pane and the input morph."
+    (Smalltalk includesKey: #AIPromptHistory) ifFalse: [
+        Smalltalk at: #AIPromptHistory put: OrderedCollection new].
+    ^ (Smalltalk at: #AIPromptHistory)' classified: 'chat'.
+
+(Smalltalk at: #AIHarness) class compile: 'promptRecallIndex
+    "Cursor for Up/Down recall: nil means live (not recalling); an integer
+    is a 1-based index into promptHistory."
+    (Smalltalk includesKey: #AIPromptRecallIndex) ifTrue: [
+        ^ (Smalltalk at: #AIPromptRecallIndex)].
+    ^ nil' classified: 'chat'.
+
+(Smalltalk at: #AIHarness) class compile: 'promptRecallIndex: anObject
+    Smalltalk at: #AIPromptRecallIndex put: anObject' classified: 'chat'.
+
+(Smalltalk at: #AIHarness) class compile: 'draftPrompt
+    (Smalltalk includesKey: #AIPromptDraft) ifTrue: [
+        ^ (Smalltalk at: #AIPromptDraft)].
+    ^ nil' classified: 'chat'.
+
+(Smalltalk at: #AIHarness) class compile: 'draftPrompt: aString
+    Smalltalk at: #AIPromptDraft put: aString' classified: 'chat'.
+
+(Smalltalk at: #AIHarness) class compile: 'rememberPrompt: aString
+    "Record a sent prompt for Up/Down recall and reset the cursor."
+    | hist |
+    aString isEmpty ifTrue: [^ nil].
+    hist := self promptHistory.
+    (hist isEmpty or: [(hist last) ~= aString]) ifTrue: [hist addLast: aString].
+    [hist size > 100] whileTrue: [hist removeFirst].
+    self promptRecallIndex: nil.
+    self draftPrompt: nil.
+    ^ aString' classified: 'chat'.
 
 (Smalltalk at: #AIHarnessChatMorph) compile: 'testInput
     self appendUser: self inputText.

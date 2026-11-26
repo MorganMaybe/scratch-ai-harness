@@ -4,8 +4,10 @@ import textwrap
 
 import pytest
 
+from harness.compiler import compile_block
 from harness.context import ProjectContext, SpriteContext
 from harness.dsl import DSLErrors, api_reference, lint, transpile
+from harness.dsl.parse import MATH_SUGAR
 from harness.dsl.vocab import CALLABLE_SPECS
 from harness.validator import validate_changeset
 
@@ -683,6 +685,123 @@ def test_numeric_menu_request_rejects_out_of_range_and_string_only_menus():
         assert any(
             "must be one of" in error.format() for error in caught.value.errors
         ), [error.format() for error in caught.value.errors]
+
+
+def test_plus_chain_with_one_text_operand_stays_a_join_end_to_end():
+    # Bundle 20261125T232037.500499Z-req257832729, attempt 01: this exact line
+    # used to die on ``+`` between two computed values at the last link.
+    chain = source(
+        """
+        @on_flag(target="Ball")
+        def hud():
+            say("Angle " + angle + "  Power " + power + "  Score " + score)
+        """
+    )
+    # Attempt 02 of the same bundle shows the hand-written shape the model
+    # would otherwise have to produce.
+    explicit = source(
+        """
+        @on_flag(target="Ball")
+        def hud():
+            say(join(join(join(join(join("Angle ", angle), "  Power "),
+                power), "  Score "), score))
+        """
+    )
+
+    assert transpile(chain).to_dict() == transpile(explicit).to_dict()
+
+
+def test_computed_plus_computed_without_text_keeps_the_ambiguous_error():
+    text = source(
+        """
+        @on_flag(target="S")
+        def f():
+            say(first + last)
+        """
+    )
+
+    with pytest.raises(DSLErrors) as caught:
+        transpile(text)
+
+    messages = [error.message for error in caught.value.errors]
+    assert messages == [
+        "'+' between two computed values is ambiguous in Scratch: first + "
+        "last. Write add(first, last) to add numbers or join(first, last) to "
+        "build text."
+    ]
+
+
+def test_number_literal_plus_computed_stays_add():
+    text = source(
+        """
+        @on_flag(target="S")
+        def f():
+            say(1 + score)
+        """
+    )
+
+    block = transpile(text).changes[0].body[0].to_dict()
+    assert block["args"]["text"] == {
+        "op": "add",
+        "args": {"a": 1, "b": {"op": "get_var", "args": {"name": "score"}}},
+    }
+
+
+def _say_source(expression: str) -> str:
+    return f'@on_flag(target="S")\ndef f():\n    say({expression})\n'
+
+
+def test_math_sugar_is_the_identifier_spelling_of_the_menu():
+    # Verified against catalog.MATH_FUNCTIONS: abs and sqrt already have their
+    # own reporters, and "e ^" / "10 ^" cannot be Python identifiers.
+    assert MATH_SUGAR == {
+        "sin",
+        "cos",
+        "tan",
+        "asin",
+        "acos",
+        "atan",
+        "ln",
+        "log",
+    }
+
+
+@pytest.mark.parametrize("name", sorted(MATH_SUGAR))
+def test_math_name_sugar_matches_the_math_function_spelling(name):
+    sugar = transpile(_say_source(f"{name}(x)"))
+    explicit = transpile(_say_source(f'math_function("{name}", x)'))
+
+    assert sugar.to_dict() == explicit.to_dict()
+
+
+def test_sqrt_is_already_bare_and_compiles_like_its_math_function_spelling():
+    sugar = transpile(_say_source("sqrt(9)"))
+    explicit = transpile(_say_source('math_function("sqrt", 9)'))
+
+    sugar_block = sugar.changes[0].body[0].args["text"]
+    explicit_block = explicit.changes[0].body[0].args["text"]
+    assert sugar_block.to_dict() == {"op": "sqrt", "args": {"n": 9}}
+    # The IR op differs (sqrt predates the sugar) but the emitted Scratch
+    # tuple is identical, which is what the image consumes.
+    assert compile_block(sugar_block) == compile_block(explicit_block)
+
+
+def test_power_menu_entries_are_not_function_sugar():
+    assert "e ^" not in MATH_SUGAR
+    assert "10 ^" not in MATH_SUGAR
+
+    with pytest.raises(DSLErrors) as caught:
+        transpile(_say_source("e(x)"))
+    assert "unknown function e()" in caught.value.errors[0].format()
+
+
+def test_math_sugar_wrong_arity_is_line_precise():
+    with pytest.raises(DSLErrors) as caught:
+        transpile(source('@on_flag(target="S")\ndef f():\n    say(sin())\n'))
+
+    error = caught.value.errors[0]
+    assert error.line == 3
+    assert "sin() needs 1 argument(s): n" in error.format()
 
 
 def test_api_reference_is_generated_from_the_catalog():

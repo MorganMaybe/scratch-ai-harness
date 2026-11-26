@@ -13,7 +13,13 @@ import difflib
 from typing import Any
 
 from ..block_ir import Change, ChangeSet, IRError
-from ..catalog import TARGET_MENU, SPRITE_TARGET_OPS, ArgSpec, spec_for
+from ..catalog import (
+    MATH_FUNCTIONS,
+    SPRITE_TARGET_OPS,
+    TARGET_MENU,
+    ArgSpec,
+    spec_for,
+)
 from ..context import ProjectContext
 from ..media import BACKDROP, COSTUME, MediaError, default_library
 from . import envelope
@@ -30,6 +36,16 @@ from .vocab import (
     ModuleCallSpec,
     ModuleParam,
     arg_specs,
+)
+
+#: Single-name sugar for ``math_function`` menu entries that are legal Python
+#: identifiers.  ``e ^`` and ``10 ^`` cannot be Python names, and ``abs`` /
+#: ``sqrt`` already have dedicated catalog reporters, so their bare spelling
+#: resolves before this table is consulted.
+MATH_SUGAR: frozenset[str] = frozenset(
+    name
+    for name in MATH_FUNCTIONS
+    if name.isidentifier() and name not in CALLABLE_SPECS
 )
 
 EMPTY_MESSAGE = (
@@ -75,8 +91,9 @@ COMPR_MESSAGE = (
     "add_to_list inside for _ in range(n)."
 )
 FSTRING_MESSAGE = (
-    "f-strings are not part of the dialect yet; join text with "
-    '"Score: " + name (a string literal on either side becomes a join block).'
+    "f-strings are not part of the dialect yet; build text with + "
+    '("Score: " + name), which becomes join blocks whenever an operand is '
+    "text."
 )
 TRY_MESSAGE = (
     "try/except is not part of the dialect (Scratch has no exceptions)."
@@ -228,6 +245,30 @@ def _is_string_constant(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
+def _is_join_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "join"
+    )
+
+
+def _is_text_expr(node: ast.AST) -> bool:
+    """True when a ``+`` operand already builds text.
+
+    A string literal and a ``join()`` call are text by construction, and so is
+    a nested ``+`` that has already resolved to join.  Propagating that
+    through the left-folded chain is what keeps
+    ``"Angle " + angle + "  Power " + power`` a join all the way down instead
+    of ending in a computed ``+`` computed error.
+    """
+    if _is_string_constant(node) or _is_join_call(node):
+        return True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _is_text_expr(node.left) or _is_text_expr(node.right)
+    return False
+
+
 def _ambiguous_plus_message(node: ast.BinOp) -> str:
     """Name both operands so the repair is mechanical.
 
@@ -240,6 +281,26 @@ def _ambiguous_plus_message(node: ast.BinOp) -> str:
     return (
         f"{AMBIGPLUS_MESSAGE}: {left} + {right}. Write add({left}, {right}) "
         f"to add numbers or join({left}, {right}) to build text."
+    )
+
+
+def _unknown_function_error(name: str, call: ast.Call) -> DSLError:
+    """Unknown call; ``atan2`` gets its exact legal rewrite plus the caveat.
+
+    ``atan2`` is not ``atan(y / x)``: the quadrant signs differ, so a silent
+    rewrite would change behavior.  Name the mechanical rewrite anyway, and
+    make the quadrant caveat impossible to miss.
+    """
+    hint = None
+    if name == "atan2" and len(call.args) == 2:
+        y, x = (ast.unparse(argument) for argument in call.args)
+        hint = (
+            f'did you mean math_function("atan", divide({y}, {x}))? '
+            "atan2 covers all four quadrants; atan only sees the ratio, so "
+            "correct the angle when x is negative."
+        )
+    return DSLError(
+        UNKNOWNFN_MESSAGE.format(name=name), line=call.lineno, hint=hint
     )
 
 
@@ -406,9 +467,7 @@ class _Transpiler:
                     f"@{name} is an event decorator; it cannot be called.",
                     line=call.lineno,
                 )
-            raise DSLError(
-                UNKNOWNFN_MESSAGE.format(name=name), line=call.lineno
-            )
+            raise _unknown_function_error(name, call)
         values, raw = self._bind_module(spec, call)
         if not spec.action:
             self.saw_reply_metadata = True
@@ -1280,7 +1339,7 @@ class _Transpiler:
                 "a script.",
                 line=call.lineno,
             )
-        raise DSLError(UNKNOWNFN_MESSAGE.format(name=name), line=call.lineno)
+        raise _unknown_function_error(name, call)
 
     def _assign(self, node: ast.Assign) -> dict[str, Any]:
         if len(node.targets) != 1:
@@ -1468,7 +1527,24 @@ class _Transpiler:
                 "value.",
                 line=call.lineno,
             )
-        raise DSLError(UNKNOWNFN_MESSAGE.format(name=name), line=call.lineno)
+        if name in MATH_SUGAR:
+            # ``sin(x)`` is the single-name spelling of the catalog's
+            # ``math_function("sin", x)``; no menu literal to validate.
+            if call.keywords or len(call.args) != 1:
+                raise DSLError(
+                    ARITY_MESSAGE.format(op=name, count=1, names="n"),
+                    line=call.lineno,
+                )
+            if isinstance(call.args[0], ast.Starred):
+                raise DSLError(STAR_MESSAGE, line=_line(call.args[0]))
+            return {
+                "op": "math_function",
+                "args": {
+                    "function": name,
+                    "n": self._expr(call.args[0]),
+                },
+            }
+        raise _unknown_function_error(name, call)
 
     def _name(self, node: ast.Name) -> dict[str, Any]:
         name = node.id
@@ -1630,7 +1706,7 @@ class _Transpiler:
 
     def _binop(self, node: ast.BinOp) -> dict[str, Any]:
         if isinstance(node.op, ast.Add):
-            if _is_string_constant(node.left) or _is_string_constant(node.right):
+            if _is_text_expr(node.left) or _is_text_expr(node.right):
                 return {
                     "op": "join",
                     "args": {

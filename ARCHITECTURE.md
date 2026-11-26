@@ -614,7 +614,7 @@ Current actions:
 - `delete_script` (by script ID)
 - `create_variable`
 - `create_sprite` (1–3 library costumes, position/direction/size/visibility/rotation)
-- `duplicate_sprite`, `delete_sprite` (AI-created sprites only)
+- `duplicate_sprite` (AI-created sprites only), `delete_sprite` (AI-created sprites, or any sprite with no scripts)
 - `add_costume`, `set_backdrop`, `set_sprite`
 
 Scripts can target `Stage`; `switch_backdrop` is the stage form of

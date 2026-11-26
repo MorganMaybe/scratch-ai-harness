@@ -265,6 +265,35 @@ def resolve_history(
     return True
 
 
+def _parse_sprite_memory(value: str) -> bool:
+    lowered = value.strip().lower()
+    if lowered == "on":
+        return True
+    if lowered == "off":
+        return False
+    raise ConfigError("sprite_memory must be one of: on, off")
+
+
+def resolve_sprite_memory(
+    config_path: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """HARNESS_SPRITE_MEMORY env > harness.ini [harness] sprite_memory > on.
+
+    With sprite memory off, a turn starts with no carried-over sprite detail
+    and no names are stored: prompts are byte-identical to the per-turn bridge.
+    """
+    env = os.environ if env is None else env
+    raw_env = (env.get("HARNESS_SPRITE_MEMORY") or "").strip()
+    if raw_env:
+        return _parse_sprite_memory(raw_env)
+    path = Path(config_path) if config_path is not None else default_config_path()
+    raw_ini = _read_harness_option(path, "sprite_memory")
+    if raw_ini:
+        return _parse_sprite_memory(raw_ini)
+    return True
+
+
 def _parse_stop_sequence(value: str) -> bool:
     lowered = value.strip().lower()
     if lowered in ("on", "true", "1"):

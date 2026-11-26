@@ -300,6 +300,13 @@ class TurnAudit:
         self.turn_budget_s = float(turn_budget_s or 0.0)
         self.generator = generator or "json"
         self._finished = False
+        #: The first user prompt is historical evidence: a lazy-load or repair
+        #: round rewrites ``user`` before the next attempt, and the load branch
+        #: re-reports the refreshed prompt through ``write_prompts``.  The
+        #: original must survive so a bundle shows what attempt 1 actually
+        #: received (later rounds land in ``prompts/user-NN.txt`` via
+        #: ``write_attempt``).
+        self._first_user_prompt_written = False
 
         self._write_json(
             "meta.json",
@@ -395,9 +402,14 @@ class TurnAudit:
             },
             full_only=True,
         )
-        # The first user prompt is written here; repair prompts are written by
-        # write_attempt() under the attempt number so they can be compared.
-        self._write("prompts/user-01.txt", user, full_only=True)
+        # The FIRST user prompt is written once and never overwritten: later
+        # write_prompts calls come from lazy-load rounds whose refreshed prompt
+        # belongs to the next attempt (written under its number by
+        # write_attempt).  system.txt and assembly.json keep last-write-wins,
+        # so they always describe the prompt the final attempt consumed.
+        if not self._first_user_prompt_written:
+            self._first_user_prompt_written = True
+            self._write("prompts/user-01.txt", user, full_only=True)
 
     @_guard
     def write_attempt(
@@ -416,6 +428,8 @@ class TurnAudit:
         echo_sprites: list[str] | None = None,
         noop_guard: bool = False,
         noop_sprites: list[str] | None = None,
+        ack_guard: bool = False,
+        ack_sprites: list[str] | None = None,
         envelope_actions: list[str] | None = None,
         envelope_fatal: bool = False,
     ) -> None:
@@ -445,6 +459,13 @@ class TurnAudit:
             # guard round naming the two legitimate ways forward.
             meta["noop_guard"] = True
             meta["noop_sprites"] = list(noop_sprites or [])
+        if ack_guard:
+            # The reply was a valid acknowledgment (zero changes) that claimed
+            # the request was already satisfied; the bridge answered with one
+            # guard round showing every current AI-owned body.  ``ack_sprites``
+            # names the sprites whose bodies were shown.
+            meta["ack_guard"] = True
+            meta["ack_sprites"] = list(ack_sprites or [])
         if envelope_actions is not None:
             # The reply-envelope layer recovered this reply's shape (prose
             # around the fence, notes after the close, a missing close, ...).

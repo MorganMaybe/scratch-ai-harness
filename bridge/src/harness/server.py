@@ -22,6 +22,7 @@ from .config import (
     resolve_config,
     resolve_generator,
     resolve_history,
+    resolve_sprite_memory,
     with_overrides,
 )
 from .context import ProjectContext
@@ -32,6 +33,7 @@ from .providers.base import ProviderError
 from .providers.factory import build_provider
 from .providers.replay import CachingProvider, RecordingProvider, ReplayProvider
 from .protocol import ProtocolError, Sym, make_message, message_type, parse_literal, read_frame, encode_frame
+from .sprite_memory import LoadedSpriteMemory
 from .validator import ValidationError
 
 log = logging.getLogger("harness.server")
@@ -133,6 +135,14 @@ class Bridge:
     #: construction.  False records nothing and renders no section, leaving
     #: prompts byte-identical to the pre-history bridge.
     history_enabled: bool | None = None
+    #: Bounded, process-local sprite-detail memory.  Shares the history store's
+    #: process-lifetime scope and is created in ``__post_init__`` unless a
+    #: caller supplies one (tests, the ladder runner).
+    sprite_memory: LoadedSpriteMemory | None = None
+    #: ``HARNESS_SPRITE_MEMORY`` / ``[harness] sprite_memory``; ``None`` resolves
+    #: it once at construction.  False starts every turn with no carried-over
+    #: detail, leaving prompts byte-identical to the per-turn bridge.
+    sprite_memory_enabled: bool | None = None
 
     def __post_init__(self) -> None:
         if self.pending is None:
@@ -143,6 +153,10 @@ class Bridge:
             self.history = ConversationHistory()
         if self.history_enabled is None:
             self.history_enabled = resolve_history()
+        if self.sprite_memory is None:
+            self.sprite_memory = LoadedSpriteMemory()
+        if self.sprite_memory_enabled is None:
+            self.sprite_memory_enabled = resolve_sprite_memory()
         self._semaphore = threading.BoundedSemaphore(self.max_concurrent)
         self._state_lock = threading.Lock()
         # Guards ``_active``; a separate lock keeps cancellation from waiting
@@ -432,6 +446,9 @@ class Bridge:
             cancel_token=token,
             audit=audit,
             history=self.history if self.history_enabled else None,
+            sprite_memory=(
+                self.sprite_memory if self.sprite_memory_enabled else None
+            ),
         )
         started = self.clock()
         # The deadline must use the real monotonic clock, not the injectable

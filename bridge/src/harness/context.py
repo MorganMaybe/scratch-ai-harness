@@ -213,8 +213,10 @@ class ProjectContext:
             )
             if sprite.ai_owned:
                 parts.append("AI-created sprite")
+            elif sprite.scripts:
+                parts.append("user sprite with scripts, read-only structure")
             else:
-                parts.append("user sprite, read-only structure")
+                parts.append("user sprite with no scripts (delete_sprite can remove it)")
             if sprite.variables:
                 parts.append("variables=" + ", ".join(sprite.variables))
             if sprite.lists:

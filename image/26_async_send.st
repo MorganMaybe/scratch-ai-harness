@@ -118,6 +118,7 @@ Load after 25_project_registry.st."
             pane pending: true.
             pane status: ''Thinking...'']
         ifFalse: [pane appendLog: ''You: '', prompt].
+    self rememberPrompt: prompt.
     pane clearInput.
     context := [self projectContext] ifError: [:e :r | nil].
     id := self nextSendId.

@@ -298,7 +298,8 @@ border is the native skin forms. Exact clean-image edge values and the version
 - Chat / Bridge / Usage switch by detaching inactive pages; the selected tab is
   lit through `ScratchTabPaneMorph>>currentTab:`.
 - Send is asynchronous; the button becomes Stop while pending. Enter sends;
-  Shift+Enter inserts a newline. The UI never blocks.
+  Shift+Enter inserts a newline; Up/Down arrows recall previous prompts like a
+  command line. The UI never blocks.
 - Clear empties the transcript and leaves the input alone. Undo calls
   `AIHarness class>>undoLast`.
 - Bridge/Usage refresh in a background fork with a 2 s timeout; both pages

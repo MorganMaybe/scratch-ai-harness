@@ -131,7 +131,7 @@ def test_very_tiny_system_budget_still_respects_the_limit():
 
 
 def test_catalog_lines_are_never_cut_in_half():
-    output = build_system_prompt(target="Sprite1", budget_chars=5000)
+    output = build_system_prompt(target="Sprite1", budget_chars=5200)
     catalog = output.split("Available block ops:\n", 1)[1]
     seen_blocks = 0
     for line in catalog.splitlines():
@@ -143,7 +143,7 @@ def test_catalog_lines_are_never_cut_in_half():
         if line.startswith("  "):
             seen_blocks += 1
     assert seen_blocks > 0
-    assert len(output) <= 5000
+    assert len(output) <= 5200
 
 
 def test_script_targeting_survives_aggressive_trimming():

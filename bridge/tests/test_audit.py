@@ -287,3 +287,76 @@ def test_keep_prunes_old_bundles(tmp_path):
     assert len(bundles) == 2
     # The newest turn is always kept.
     assert any("req3" in path.name for path in bundles)
+
+
+def test_write_prompts_keeps_the_original_first_user_prompt(tmp_path):
+    store = _store(tmp_path)
+    audit = _turn(store)
+    assert audit is not None
+
+    # A lazy-load round re-reports the refreshed prompt through write_prompts;
+    # the bundle must keep what attempt 1 actually received, not the rewrite.
+    audit.write_prompts("system v1", "first user prompt")
+    audit.write_prompts("system v2", "second user prompt")
+
+    root = audit.root
+    assert (root / "prompts/user-01.txt").read_text(encoding="utf-8") == (
+        "first user prompt"
+    )
+    # The system prompt keeps last-write-wins: it describes the prompt the
+    # final attempt consumed.
+    assert (root / "prompts/system.txt").read_text(encoding="utf-8") == "system v2"
+
+
+def _detail_context() -> ProjectContext:
+    """Demo context plus one AI-owned script with tuples, loadable on demand."""
+    from harness.context import ScriptSummary
+
+    context = ProjectContext.demo()
+    context.sprites["Sprite1"].scripts.append(
+        ScriptSummary(
+            script_id="ai-1",
+            target="Sprite1",
+            label="bounce",
+            hat="EventHatMorph",
+            block_count=2,
+            owned=True,
+            tuples=[
+                [Sym("EventHatMorph"), "Scratch-StartClicked"],
+                [Sym("forward:"), 10],
+            ],
+        )
+    )
+    return context
+
+
+def test_load_round_preserves_attempt_prompts_and_records_events(tmp_path):
+    store = _store(tmp_path)
+    audit = _turn(store)
+    assert audit is not None
+    provider = MockLLM(
+        [
+            {"load_sprite": ["Sprite1"], "reason": "need the bounce body"},
+            draw_square_response(),
+        ]
+    )
+    agent = Agent(provider, _detail_context(), audit=audit)
+    result = agent.handle("Make it bounce faster.", request_id=7)
+    _finish(audit, result)
+    assert result.attempts == 2
+
+    root = audit.root
+    first = (root / "prompts/user-01.txt").read_text(encoding="utf-8")
+    # The original attempt-1 prompt survives the load round: no "included"
+    # announcement, and the request line is intact.
+    assert "now included in the system prompt" not in first
+    assert "User request:\nMake it bounce faster." in first
+    # The post-load prompt belongs to attempt 2, under its own number.
+    second = (root / "prompts/user-02.txt").read_text(encoding="utf-8")
+    assert "now included in the system prompt" in second
+    assert "sprite detail: Sprite1" in second
+    # The load chain is reconstructible from the bundle alone.
+    assembly = json.loads((root / "prompts/assembly.json").read_text(encoding="utf-8"))
+    assert assembly["user"]["load_events"] == [
+        {"attempt": 1, "packs": [], "sprites": ["Sprite1"]}
+    ]

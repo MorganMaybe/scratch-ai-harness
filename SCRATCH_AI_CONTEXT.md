@@ -205,7 +205,7 @@ fields are rejected.
 | `create_list` | `name`, `scope`, `target` for sprite scope, `items` | `scope` is `global` or `sprite`; global lives on Stage. `items` is an optional array of strings/numbers. Name must be new. |
 | `create_sprite` | `name`, and either `costumes` (1–3) or `preset`, optional `x y direction size visible rotation_style` | Name unique; AI-created. A preset supplies its own costumes (sometimes more than 3), rotation centres and default direction/size/rotation style. Defaults: 0, 0, 90, 100, true, `all around`. |
 | `duplicate_sprite` | `target`, `name` | Source must be AI-created; copies costumes, variables, properties; **not** scripts. |
-| `delete_sprite` | `target` | AI-created only; its scripts are removed. Undo can recreate. |
+| `delete_sprite` | `target` | AI-created sprites, or any sprite with no scripts; its scripts are removed. Undo can recreate. |
 | `add_costume` | `target`, `library`, optional `name`, `select` | Target sprite or Stage; Stage uses a backdrop image. Name defaults to the file stem. `select` defaults false. |
 | `set_backdrop` | `library`, optional `name`, `select` | Stage only. `select` defaults true. |
 | `set_sprite` | `target`, optional `x y direction size visible rotation_style` | Sprite only (not Stage). Omitted fields stay unchanged. |

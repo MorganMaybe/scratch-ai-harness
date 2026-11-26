@@ -335,7 +335,8 @@ in `NATIVE_UI_BIBLE.md` §6.5 / §8.8, not with guesses from the code.
 |---|---|---|
 | Input frame | `buildInput`, `36:453` | `ImageFrameMorph` with `#typein` |
 | Input editor | `AIHarnessChatInputMorph`, `36:141-198` | white-on-dark `MultilineStringMorph`, `#UpdatingStringField` |
-| Enter / Shift+Enter | `keyStroke:`, `36:161` | Enter sends, Shift+Enter inserts newline |
+| Enter / Shift+Enter | `keyStroke:`, `36:162` | Enter sends, Shift+Enter inserts newline |
+| Up / Down arrows | `keyStroke:` -> `recallStep:`, `36` | recall previous prompts into the input like a command line |
 | Input growth | `lineWrapFrom:`, `36:189`; `inputChanged`, `36:702` | notify rail after typing |
 | Footer buttons | `buildButtons`, `36:463` | Clear / Undo / Send |
 | Button wiring | `36:464-483` | targets: rail (Clear), `AIHarness` (Undo, Send) |
@@ -412,7 +413,7 @@ front-first submorph list.
 | Reload UI | button `36:389`; menu `37:289`; worker `39:13-20` | reload 36/38/37 and rebuild the rail |
 | Startup docking | `startUp`, `37:380` | loads config, starts server, docks rail |
 | Native layout rollback | `fixLayoutWithoutAIChat`, `37:19` | original Scratch layout, no `chatWidth` |
-| Clean-image reset | `cleanProject`, `29:26` | clears chat/input/pending/pages and selects Chat |
+| Clean-image reset | `cleanProject`, `29:26` | clears pen trails, chat/input/pending/pages and selects Chat |
 
 ### 5.11 Native skin and form access
 

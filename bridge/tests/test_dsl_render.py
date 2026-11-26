@@ -413,6 +413,29 @@ def test_add_with_two_computed_values_renders_the_explicit_call():
     assert result == block
 
 
+def test_add_with_a_join_operand_renders_the_explicit_call():
+    # Once ``join(...) + 2`` parses as join, infix would round-trip to the
+    # wrong op; the renderer must keep the explicit add() spelling.
+    value = {
+        "op": "add",
+        "args": {
+            "a": {
+                "op": "join",
+                "args": {
+                    "a": "Score: ",
+                    "b": {"op": "get_var", "args": {"name": "score"}},
+                },
+            },
+            "b": 2,
+        },
+    }
+    block = {"op": "set_var", "args": {"name": "x", "value": value}}
+    rendered, result = _roundtrip_block(block)
+
+    assert "add(" in rendered
+    assert result == block
+
+
 def test_arithmetic_precedence_is_preserved_with_parentheses():
     value = {
         "op": "multiply",

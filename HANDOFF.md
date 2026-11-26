@@ -1,9 +1,10 @@
 # Scratch AI Harness: handoff
 
-**Date:** 2026-11-24
-**Status:** the `pydsl` work is merged into `main`: Scratch-Python front end,
-conversation memory and the reply-envelope layer all landed. 852 offline tests
-pass on a fresh clone (854 with the local audit corpus).
+**Date:** 2026-11-26
+**Status:** the `pydsl` work plus the session-26 anti-hallucination pass are on
+`main`: Scratch-Python front end, conversation memory, the reply-envelope
+layer, the empty-ack/load guards, parser sugar and the expanded lints all
+landed. 916 offline tests pass with the local audit corpus.
 **Repo:** https://github.com/MorganMaybe/scratch-ai-harness, a fork of
 [`scratchfoundation/Scratch_1.4`](https://github.com/scratchfoundation/Scratch_1.4).
 **Start here:** [`README.md`](README.md) and [`QUICKSTART.md`](QUICKSTART.md).
@@ -26,9 +27,10 @@ detail is in [`docs/HANDOFF-2026-11-15.md`](docs/HANDOFF-2026-11-15.md).
 | **Scratch-Python front end (`generator = dsl`)** | **Built and live-verified end to end (bridge + image).** JSON stays the default until the remaining measurement (§1a) says otherwise. See `PY_DSL_SCOPE.md`, `SCRATCH_AI_DSL_CONTEXT.md`. |
 | **Conversation memory (acked turns + one-line compression)** | **Working**; first live ladder A/B done, doodle-jump image replay pending (§1a) |
 | **Reply-envelope layer** | **Working**; audited-corpus replay clean, live A/B folded into the measurement in §1a |
+| **Anti-hallucination guards (session 26)** | **Working offline**; live replay pending. Empty-ack guard, cross-turn sprite memory (`sprite_memory=on`), free first duplicate-load nudge, `+`-chain text propagation, single-name math sugar, say-while-hidden and dead-store lints, audit load-event chain |
 | **Release image (windowed, no control server)** | **Verified** |
 | **Release bundle (stock media, no secrets)** | **Built, about 50.6 MB** |
-| Tests | **852 passed, 4 skipped** on a fresh clone (media fixture, no audit corpus); **854, 2** with the local corpus |
+| Tests | **916 passed, 3 skipped** with the local audit corpus (2 live + 1 missing historical bundle); corpus tests skip cleanly on a fresh clone |
 | Live model path | `opencode-go` → `deepseek-v4.1-flash` |
 
 The Usage page's Model row also has a small switcher between the two
@@ -140,6 +142,13 @@ flip. Then decide the `dsl` default on that evidence. Phase C (an
 LLM-maintained rolling summary) stays unbuilt until the replay shows the
 deterministic one-liners actually losing intent.
 
+The session-26 guards (empty-ack, sprite memory, duplicate-load nudge) and
+the parser sugar change attempt counts and prompt shapes, so the same replay
+doubles as their A/B: the 2026-11-25 bundles in `scratch\base\audit` are the
+recorded before-curve (8 turns, 21 model calls, one hallucinated
+acknowledgment, four turns paying the load tax). A guards-off run is
+`-History on` plus `sprite_memory=off`; nothing else changes.
+
 **Runtime notes from the 2026-11-23 live session (learned the hard way):**
 
 - The bridge console window must stay open; closing it kills the bridge.
@@ -225,7 +234,7 @@ run. Bundles contain prompts and raw replies, so keep them local.
 ```powershell
 cd bridge
 $env:PYTHONPATH="src"
-python -m pytest -q          # 852 passed, 4 skipped on a fresh clone
+python -m pytest -q          # 916 passed, 3 skipped with the local corpus
 cd ..
 python tools\check_st.py     # every image/*.st
 ```

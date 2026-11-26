@@ -356,7 +356,7 @@ is the loader to keep. Do not load 16a after 17/17c.
 | Script | What it does |
 |---|---|
 | `28_sprites_stage.st` | `createSprite`, `duplicateSprite`, `deleteSprite`, `addCostume`, `setBackdrop`, `setSprite`, `createList`; AI sprite ownership; 8th context element; `scale:` compatibility setter; sprite/list ownership and undo |
-| `29_clean_image.st` | `clean` / `save-clean` control commands: latest image with no scripts/variables, cat only, cleared chat |
+| `29_clean_image.st` | `clean` / `save-clean` control commands: latest image with no scripts/variables, no pen trails, cat only, cleared chat |
 | `30_color_tuples.st` | converts `#(#color r g b)` markers into Squeak `Color` objects for `touchingColor:`, `color:sees:` and `penColor:` |
 
 Verified calls in this image (2009 Squeak):

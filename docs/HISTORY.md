@@ -503,3 +503,80 @@ merged back into `main` on 2026-11-24. Scope docs: `PY_DSL_SCOPE.md`
   diagnostics. Suite 854 passed, 2 skipped with the corpus (852 + 4 skips
   on a fresh clone).
 
+
+---
+
+## Session 25 - three nitpick fixes (2026-11-25)
+
+- **Clean images clear pen trails (2026-11-25):** `cleanProject`
+  (`image/29_clean_image.st`) deleted scripts/vars/lists and sprites but never
+  cleared the stage's trails form, so `clean` / `save-clean` / release saves
+  baked old pen drawings into the snapshot. It now sends `clearPenTrails` right
+  after the stage nil check; the log line and docs mention pen trails.
+- **Scriptless sprites are deletable (2026-11-25):** `delete_sprite` was
+  rejected for every non-AI sprite. The validator now rejects only user sprites
+  that still have scripts; a scriptless user sprite (the default cat)
+  validates. `duplicate_sprite` stays AI-only. Prompt rule text (JSON + DSL),
+  the context sprite labels, scope docs and tests updated. 855 passed.
+- **Prompt recall with Up/Down (2026-11-25):** the chat input's `keyStroke:`
+  intercepts arrow keys (30/31) and `recallStep:` walks a 100-prompt history
+  kept in Smalltalk globals (`AIPromptHistory`, `AIPromptRecallIndex`,
+  `AIPromptDraft`), so recall survives UI reloads without new class ivars (the
+  input morph's class creation is guarded and would skip them). Prompts are
+  recorded in `startSendAsync:`; Up enters recall at the newest prompt, Down
+  walks back and, past the newest, restores the in-progress draft.
+
+## Session 26 - audit-driven anti-hallucination pass (2026-11-26)
+
+The 2026-11-25 live runs (8 turns, 21 model calls) were audited bundle by
+bundle and every guard built here traces to a specific failed or lying turn
+in `scratch/base/audit`:
+
+- **Empty-ack guard** (from `req257928476`: "make the power cap 200" answered
+  with a summary-only reply claiming the cap "now clamps to 200" - zero
+  changes, accepted, and the false claim entered conversation history): a
+  zero-change reply now gets one guard round mirroring the no-op replace
+  guard - the prompt restates the request, shows every current AI-owned body,
+  and offers two outs (restate the acknowledgment, or make the change). An
+  ack answering a no-op guard prompt is accepted directly (already
+  evidence-checked); a second ack is accepted so it cannot loop. Audit meta
+  gains `ack_guard`/`ack_sprites`.
+- **Load-protocol economics** (from `req249401087`/`req249833989`/`req257972059`:
+  4 of 8 turns spent 2-3 round trips on `load_sprite`, duplicate requests ate
+  shared repairs, and every follow-up turn re-loaded the same sprites):
+  `harness/sprite_memory.py` carries loaded sprite *names* across turns
+  (bodies always re-render from the current context, so nothing can go
+  stale; `sprite_memory=off` restores byte-identical per-turn prompts via
+  `HARNESS_SPRITE_MEMORY`/`[harness] sprite_memory`); the first duplicate
+  load request per turn is a free nudge naming what is already included
+  (only a second is charged); the appendix teaches one-batch loads. The
+  attempt-loop range widens by two for the ack guard and the free nudge.
+- **Parser sugar** (from `req257832729` attempt 1 dying on
+  `say("Angle " + angle + ...)` after the left-fold ended computed+computed,
+  and `req249243250` attempt 1 inventing `atan2`/`cos`/`sin`): `+` now
+  propagates text through a chain (a string literal, a `join()`, or a
+  resolved join makes the whole chain a join; computed+computed without
+  text keeps the exact old error), and `sin/cos/tan/asin/acos/atan/ln/log`
+  are single-name spellings of `math_function` derived from
+  `catalog.MATH_FUNCTIONS`. `atan2` stays an error but its diagnostic now
+  offers the exact `math_function("atan", divide(y, x))` rewrite plus a
+  quadrant caution. `dsl/render.py` keeps `add(join(...), 2)` explicit so
+  render->transpile cannot drift ops.
+- **Advisory lints** (both evening bundles' `lints.json` were `[]` while the
+  accepted slingshot shipped an invisible HUD and a dead store):
+  say/say_for after an unconditional hide with no intervening show, and
+  variables this change set creates and writes but nothing ever reads.
+  Historical-corpus replay (new `test_lints_corpus.py`) fires the hud lint
+  on the audited slingshot turn and surfaced six more genuine dead stores
+  (`shots`, `score1`/`score2`) with no crashes.
+- **Audit fidelity** (reconstructing the load chains from the 2026-11-25
+  bundles was ambiguous): `prompts/user-01.txt` is written once and never
+  overwritten by load rounds; the load branch records the prompt the attempt
+  actually answered under that attempt's number; `assembly.json` carries an
+  ordered `load_events` chain.
+
+Tests: 916 offline passed, 3 skipped (was 855 at session 25's close);
+`tools/check_st.py` clean. Suggested next measurement: replay the 2026-11-25
+flow (slingshot + pool, history on, dsl) through `tools/ladder.py` and
+`tools/revision_fidelity.py` with `-Audit full`; tonight's bundles are the
+before-curve for the ack guard and load economics.

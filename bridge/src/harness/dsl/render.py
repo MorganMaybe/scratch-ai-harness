@@ -139,6 +139,10 @@ def _is_block(value: Any) -> bool:
     return isinstance(value, dict) and isinstance(value.get("op"), str)
 
 
+def _is_join_block(value: Any) -> bool:
+    return _is_block(value) and value.get("op") == "join"
+
+
 def _require_dict(value: Any, what: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise DSLError(f"{what} must be an object")
@@ -319,9 +323,12 @@ def _expr(value: Any) -> str:
 
 
 def _render_add(left: Any, right: Any) -> str:
-    # ``"literal" + x`` would re-transpile to ``join``; two computed values
-    # would be ambiguous.  Both cases need the explicit catalog call.
+    # ``"literal" + x`` and ``join(...) + x`` would re-transpile to ``join``;
+    # two computed values would be ambiguous.  All three cases need the
+    # explicit catalog call.
     if isinstance(left, str) or isinstance(right, str):
+        return _render_call_from_args("add", {"a": left, "b": right}, ("a", "b"))
+    if _is_join_block(left) or _is_join_block(right):
         return _render_call_from_args("add", {"a": left, "b": right}, ("a", "b"))
     if not _is_number(left) and not _is_number(right):
         return _render_call_from_args("add", {"a": left, "b": right}, ("a", "b"))

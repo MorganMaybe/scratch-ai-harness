@@ -32,6 +32,11 @@ NEVER_SET = (
     "script 'show_score' (Crab1): variable 'score' is read but never set; "
     "it will always be 0"
 )
+SAY_HIDDEN = (
+    "script 'hud' (Ball): say while hidden - speech bubbles on a hidden sprite "
+    "do not show"
+)
+DEAD_STORE = "variable 'hit' is written but never read; remove it or read it"
 
 
 def _context(
@@ -91,6 +96,16 @@ def _read(name: str, label: str = "show_score") -> dict:
         ],
         label=label,
     )
+
+
+def _write(name: str, label: str = "score_up") -> dict:
+    return _script(
+        [{"op": "set_var", "args": {"name": name, "value": 1}}], label=label
+    )
+
+
+def _say(text: str = "hello") -> dict:
+    return {"op": "say", "args": {"text": text}}
 
 
 def _script_tuples(context: ProjectContext, body: list[dict]) -> list:
@@ -256,6 +271,119 @@ def test_wait_suppresses_flicker():
     assert lint_changeset(changeset, _context()) == []
 
 
+def test_say_after_unconditional_hide_warns():
+    changeset = _changeset(
+        _script(
+            [
+                {"op": "hide"},
+                {
+                    "op": "forever",
+                    "body": [
+                        {
+                            "op": "if",
+                            "args": {
+                                "condition": {
+                                    "op": "equals",
+                                    "args": {
+                                        "a": {
+                                            "op": "get_var",
+                                            "args": {"name": "screen"},
+                                        },
+                                        "b": 1,
+                                    },
+                                }
+                            },
+                            "body": [_say("Angle 45  Power 10  Score 0")],
+                        },
+                        {"op": "wait", "args": {"seconds": 0.2}},
+                    ],
+                },
+            ],
+            label="hud",
+            target="Ball",
+        )
+    )
+    assert lint_changeset(changeset, _context()) == [SAY_HIDDEN]
+
+
+def test_say_for_after_unconditional_hide_warns():
+    changeset = _changeset(
+        _script(
+            [
+                {"op": "hide"},
+                {"op": "say_for", "args": {"text": "Miss!", "seconds": 1}},
+            ],
+            label="hud",
+            target="Ball",
+        )
+    )
+    assert lint_changeset(changeset, _context()) == [SAY_HIDDEN]
+
+
+def test_show_before_say_does_not_warn():
+    changeset = _changeset(
+        _script(
+            [{"op": "hide"}, {"op": "show"}, _say()],
+            label="hud",
+            target="Ball",
+        )
+    )
+    assert lint_changeset(changeset, _context()) == []
+
+
+def test_conditional_hide_before_say_does_not_warn():
+    changeset = _changeset(
+        _script(
+            [
+                {
+                    "op": "if",
+                    "args": {
+                        "condition": {
+                            "op": "key_pressed",
+                            "args": {"key": "space"},
+                        }
+                    },
+                    "body": [{"op": "hide"}],
+                },
+                _say(),
+            ],
+            label="hud",
+            target="Ball",
+        )
+    )
+    assert lint_changeset(changeset, _context()) == []
+
+
+def test_conditional_show_before_say_does_not_warn():
+    changeset = _changeset(
+        _script(
+            [
+                {"op": "hide"},
+                {
+                    "op": "if",
+                    "args": {
+                        "condition": {
+                            "op": "equals",
+                            "args": {
+                                "a": {
+                                    "op": "get_var",
+                                    "args": {"name": "screen"},
+                                },
+                                "b": 1,
+                            },
+                        }
+                    },
+                    "body": [{"op": "show"}],
+                },
+                _say(),
+            ],
+            label="hud",
+            target="Ball",
+        )
+    )
+    assert lint_changeset(changeset, _context()) == []
+
+
 def test_variable_read_without_write_warns():
     changeset = _changeset(_create_variable("score"), _read("score"))
     assert lint_changeset(changeset, _context()) == [NEVER_SET]
@@ -325,6 +453,70 @@ def test_read_only_context_script_write_does_not_count():
     )
     changeset = _changeset(_create_variable("score"), _read("score"))
     assert lint_changeset(changeset, context, context.registry()) == [NEVER_SET]
+
+
+def test_created_variable_written_never_read_warns():
+    changeset = _changeset(_create_variable("hit"), _write("hit"))
+    assert lint_changeset(changeset, _context()) == [DEAD_STORE]
+
+
+def test_created_variable_read_in_same_script_is_not_flagged():
+    changeset = _changeset(
+        _create_variable("hit"),
+        _script(
+            [
+                {"op": "set_var", "args": {"name": "hit", "value": 1}},
+                {
+                    "op": "say",
+                    "args": {
+                        "text": {"op": "get_var", "args": {"name": "hit"}}
+                    },
+                },
+            ],
+            label="writer",
+        ),
+    )
+    assert lint_changeset(changeset, _context()) == []
+
+
+def test_created_variable_read_in_another_changeset_script_is_not_flagged():
+    changeset = _changeset(
+        _create_variable("hit"), _write("hit"), _read("hit")
+    )
+    assert lint_changeset(changeset, _context()) == []
+
+
+def test_created_variable_read_in_context_script_is_not_flagged():
+    base = _context()
+    tuples = _script_tuples(
+        base,
+        [
+            {
+                "op": "say",
+                "args": {"text": {"op": "get_var", "args": {"name": "hit"}}},
+            }
+        ],
+    )
+    context = _context(
+        scripts=[
+            ScriptSummary(
+                script_id="ai-7",
+                target="Crab1",
+                label="reader",
+                hat="when_flag_clicked",
+                block_count=2,
+                owned=True,
+                tuples=tuples,
+            )
+        ]
+    )
+    changeset = _changeset(_create_variable("hit"), _write("hit"))
+    assert lint_changeset(changeset, context, context.registry()) == []
+
+
+def test_pre_existing_variable_written_never_read_is_not_flagged():
+    changeset = _changeset(_write("lives"))
+    assert lint_changeset(changeset, _context(stage_variables=["lives"])) == []
 
 
 def test_canonical_wander_script_is_clean():

@@ -1,8 +1,8 @@
 "Clean-image maintenance.
 
 The user keeps a 'latest, clean' image: the current harness classes, no
-scripts, a cleared chat log, and only the cat (Sprite1). Use it after each
-change set of work:
+scripts, no pen trails, a cleared chat log, and only the cat (Sprite1). Use it
+after each change set of work:
 
     python tools\ai_control.py load image\29_clean_image.st   (once per image)
     python tools\ai_control.py save-clean ScratchAiTesting
@@ -35,6 +35,8 @@ Load after 28_sprites_stage.st."
     frame ifNil: [^ ''error: no frame''].
     stage := frame workPane.
     stage ifNil: [^ ''error: no stage''].
+    "A clean image must not carry old pen trails into the snapshot."
+    [stage clearPenTrails] ifError: [:e :r | nil].
     keep := ''Sprite1''.
     [self dropPendingSends: ''clean''] ifError: [:e :r | nil].
     stage scripts asArray do: [:stack |
@@ -75,7 +77,7 @@ Load after 28_sprites_stage.st."
         pane status: ''Ready''].
     Smalltalk at: #AIHarnessCanceledSends put: Set new.
     Smalltalk at: #AIHarnessCurrentSendId put: nil.
-    self logLine: ''clean project: no scripts, cat only, chat cleared''.
+    self logLine: ''clean project: no scripts, pen trails cleared, cat only, chat cleared''.
     ^ ''ok clean''' classified: 'maintenance'.
 
 (Smalltalk at: #AIHarness) class compile: 'saveCleanAs: newName

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from harness.block_ir import ChangeSet, IRError
 from harness.changeset import compile_changeset
-from harness.context import ProjectContext, SpriteContext
+from harness.context import ProjectContext, ScriptSummary, SpriteContext
 from harness.protocol import Sym, parse_literal
 from harness.validator import validate_changeset
 
@@ -124,9 +124,31 @@ def test_create_sprite_needs_one_to_three_costumes():
     assert validate_changeset(too_many, ProjectContext.demo())
 
 
-def test_delete_and_duplicate_are_ai_sprite_only():
-    user_delete = changeset([{"action": "delete_sprite", "target": "Sprite1"}])
-    assert any("user sprite" in str(issue) for issue in validate_changeset(user_delete, ProjectContext.demo()))
+def test_delete_sprite_allows_scriptless_user_sprite():
+    # The demo Sprite1 is a user sprite with no scripts, so it is deletable.
+    data = changeset([{"action": "delete_sprite", "target": "Sprite1"}])
+    assert validate_changeset(data, ProjectContext.demo()) == []
+
+
+def test_delete_sprite_rejects_user_sprite_with_scripts():
+    scripted = ProjectContext.demo()
+    scripted.sprites["Sprite1"].scripts = [
+        ScriptSummary(
+            script_id="user-1",
+            target="Sprite1",
+            label="user script",
+            hat="when_flag_clicked",
+            block_count=3,
+            owned=False,
+        )
+    ]
+    data = changeset([{"action": "delete_sprite", "target": "Sprite1"}])
+    assert any(
+        "user sprite" in str(issue) for issue in validate_changeset(data, scripted)
+    )
+
+
+def test_duplicate_sprite_is_ai_sprite_only():
     user_duplicate = changeset(
         [{"action": "duplicate_sprite", "target": "Sprite1", "name": "Cat2"}]
     )

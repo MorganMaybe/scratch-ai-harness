@@ -354,6 +354,44 @@ def test_python_builtin_is_also_an_unknown_function():
     )
 
 
+def test_atan2_offers_the_exact_atan_rewrite_and_a_quadrant_caution():
+    # Bundle 20261125T205727.950021Z-req249243250 wrote native atan2/cos/sin.
+    error = assert_diagnostic(
+        body("aim = atan2(y, x)"),
+        "unknown function atan2()",
+        3,
+    )
+
+    text = error.format()
+    assert 'math_function("atan", divide(y, x))' in text
+    assert "quadrant" in text
+    assert error.hint is not None and error.hint.startswith("did you mean")
+
+
+def test_atan2_hint_quotes_the_actual_arguments_and_source_line():
+    error = assert_diagnostic(
+        body("aim = atan2(mouse_y() - y_position(), mouse_x() - x_position())"),
+        "unknown function atan2()",
+        3,
+    )
+
+    assert (
+        'math_function("atan", divide(mouse_y() - y_position(), '
+        "mouse_x() - x_position()))" in error.format()
+    )
+    quoted = error.format(include_source=True)
+    assert quoted.startswith(
+        "line 3: aim = atan2(mouse_y() - y_position(), "
+        "mouse_x() - x_position())"
+    )
+
+
+def test_other_unknown_functions_keep_the_plain_diagnostic():
+    error = assert_diagnostic(body("jump(1)"), "unknown function jump()", 3)
+
+    assert error.hint is None
+
+
 def test_starred_arguments_are_rejected():
     assert_diagnostic(
         body("move(*args)"),

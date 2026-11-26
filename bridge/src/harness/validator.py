@@ -593,11 +593,11 @@ def validate_changeset(
                 issues.append(ValidationIssue(path, f"unknown sprite {change.target!r}"))
             elif sprite.is_stage:
                 issues.append(ValidationIssue(path, "the stage cannot be deleted"))
-            elif not sprite.ai_owned:
+            elif not sprite.ai_owned and sprite.scripts:
                 issues.append(
                     ValidationIssue(
                         path,
-                        f"sprite {change.target!r} is a user sprite and cannot be deleted",
+                        f"sprite {change.target!r} is a user sprite with scripts and cannot be deleted",
                     )
                 )
             else:

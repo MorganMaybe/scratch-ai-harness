@@ -157,9 +157,10 @@ the model target). New rules:
 - Sprite names are unique **case-insensitively**; the validator rejects a clash.
 - Sprites created by the harness are marked `aiOwned=true`. The image must
   persist that flag (see §3.5).
-- User sprites are read-only for structural changes: the model may add scripts
-  and costumes to them, but may not rename, delete, duplicate-over or recostume
-  destructively. `delete_sprite`/`duplicate_sprite` are AI-sprite-only.
+- User sprites with scripts are read-only for structural changes: the model may
+  add scripts and costumes to them, but may not rename, delete, duplicate-over or
+  recostume destructively. `delete_sprite` may remove a user sprite that has no
+  scripts; `duplicate_sprite` remains AI-sprite-only.
 
 ### 3.3 Ordered validation
 
@@ -226,7 +227,8 @@ costumes; add the ownership flag to `manifest.txt` or `harness.meta`.
 ### 3.6 Deliberate limits
 
 - No paint editor, no image generation, no downloads, no uploads.
-- No rename of user sprites; no deletion of user sprites.
+- No rename of user sprites; no deletion of user sprites that still have scripts
+  (a scriptless user sprite can be deleted).
 - No `.sprite` import in the MVP (whole sprites with scripts are a second
   design problem); individual images only.
 - No sound import, no list contents, no custom blocks.
@@ -332,7 +334,8 @@ through the mock bridge.
    `.sprite` bundles? Bundles carry scripts, which complicates ownership.
 2. **Naming:** library file stem as the costume name (recommended); sprite names
    case-insensitive unique.
-3. **Deletion:** AI-created sprites only (recommended); user sprites read-only.
+3. **Deletion:** AI-created sprites, plus user sprites with no scripts; user
+   sprites with scripts stay read-only.
 4. **Stage code:** allowed, with `switch_backdrop` as the only new stage block
    (recommended).
 5. **Undo of delete:** full recreate for AI sprites (recommended) vs. disallow
@@ -370,7 +373,7 @@ through the mock bridge.
 
 - Generating or downloading art; using non-Scratch assets.
 - Sound library import (a natural follow-up).
-- Renaming or deleting user sprites.
+- Renaming user sprites; deleting user sprites that still have scripts.
 - Custom blocks, list contents, watchers. (Clones were added in session 13.)
 - Multi-frame animation authoring beyond 3 costumes.
 - A drag-and-drop scene editor in the pane.
